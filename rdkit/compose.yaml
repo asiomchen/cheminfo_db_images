@@ -1,0 +1,19 @@
+services:
+    rdkit:
+        image: antonsiomchen/cheminfo-rdkit:rocky9-postgres16.11-rdkit2024.03.6
+        container_name: test-rocky9-postgres16-rdkit2024.03.6
+        environment:
+            - POSTGRES_PASSWORD=postgres
+            - POSTGRES_USER=postgres
+            - POSTGRES_DB=postgres
+        ports:
+            - "5432:5432"
+        volumes:
+            - data:/var/lib/postgresql/data
+
+# volume is external
+volumes:
+    data:
+        external: true
+    
+            

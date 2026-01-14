@@ -1,0 +1,19 @@
+services:
+    rdkit:
+        image: antonsiomchen/cheminfo-db:rocky9-postgres15.15-bingo1.34.0
+        container_name: test-rocky9-postgres15.15-bingo1.34.0
+        environment:
+            - POSTGRES_PASSWORD=postgres
+            - POSTGRES_USER=postgres
+            - POSTGRES_DB=postgres
+        ports:
+            - "5432:5432"
+        volumes:
+            - data_bingo:/var/lib/postgresql/data
+
+# volume is external
+volumes:
+    data_bingo:
+        external: true
+    
+            
