@@ -1,46 +1,75 @@
-# ChemInfo Database Docker Images
-
-This repository contains Docker images for PostgreSQL with the Bingo chemistry extension, built on Rocky Linux.
-
-## Image Naming Convention
-
-Images are tagged using the format:
-```
-antonsiomchen/cheminfo-db:rocky<ROCKY_VERSION>-postgres<PG_MAJOR>-bingo<BINGO_VERSION>
-```
-
-For Rocky Linux 9, an alternative tag without the `rocky9-` prefix is also created:
-```
-antonsiomchen/cheminfo-db:postgres<PG_MAJOR>-bingo<BINGO_VERSION>
-```
-
-### Examples
-- `antonsiomchen/cheminfo-db:rocky9-postgres17-bingo1.36.0`
-- `antonsiomchen/cheminfo-db:postgres17-bingo1.36.0` (alternative for Rocky 9)
 
 
-## Using the Images
+# Cheminformatic Database Images
 
-This images install specified PostgreSQL version from the official PostgreSQL repository and use the [official PostgreSQL entrypoint script](https://hub.docker.com/_/postgres), so the usage is the same as for the official PostgreSQL image.
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://hub.docker.com/repository/docker/antonsiomchen/cheminfo-db)
+![Docker Pulls](https://img.shields.io/docker/pulls/antonsiomchen/cheminfo-db?style=flat-square)
+![Docker Stars](https://img.shields.io/docker/stars/antonsiomchen/cheminfo-db)
 
-### Basic Usage
+
+Yet another PostgreSQL images with pre-installed **RDKit** or **Bingo** extensions, built on **Rocky Linux 9**.
+
+
+**Currently supports only Linux x86_64 architecture, arm64 support will be added later**
+
+## Quick Start
+
+Run a PostgreSQL instance with the RDKit extension:
 
 ```bash
 docker run -d \
   --name cheminfo-db \
-  -e POSTGRES_PASSWORD=secretpassword \
+  -e POSTGRES_PASSWORD=mysecretpassword \
   -e POSTGRES_DB=chemistry \
   -p 5432:5432 \
-  -v pgdata:/var/lib/postgresql/17/docker \
-  antonsiomchen/cheminfo-db:postgres17-bingo1.36.0
+  -v pgdata:/var/lib/postgresql/data \
+  antonsiomchen/cheminfo-db:postgres17-rdkit2024.03.6
 ```
 
-### Environment Variables
+## Image Tagging
 
-The image supports all standard PostgreSQL environment variables:
+We provide flexible tagging to suit your needs:
 
-- `POSTGRES_PASSWORD` - Required. Password for the PostgreSQL superuser
-- `POSTGRES_USER` - Optional. Default: `postgres`
-- `POSTGRES_DB` - Optional. Default: same as `POSTGRES_USER`
-- `POSTGRES_INITDB_ARGS` - Optional. Additional arguments for `initdb`
-- `POSTGRES_HOST_AUTH_METHOD` - Optional. Default: `scram-sha-256` or `md5` (version dependent)
+| Format | Example |
+| :--- | :--- |
+| **Universal** | `rocky9-postgres17.7-rdkit2024.03.6` |
+| **Simplified** | `postgres17-rdkit2024.03.6` (latest minor PG) |
+| **Specific** | `postgres17.7-rdkit2024.03.6` |
+
+*Note: Simplified tags without the `rocky9-` prefix default to Rocky Linux 9.*
+
+## Supported Software
+
+| Component | Versions |
+| :--- | :--- |
+| **PostgreSQL** | 15, 16, 17, 18 |
+| **RDKit** | 2024.03.6, 2024.09.4, 2025.03.6, 2025.09.4 |
+| **Bingo** | 1.34.0, 1.35.0, 1.36.0 |
+
+## Key Features
+
+- **Ready to Use**: Extensions are pre-installed and added to `shared_preload_libraries`.
+- **Auto-Initialization**: RDKit extension is automatically created in the default database.
+- **Official Entrypoint**: Uses the official PostgreSQL entrypoint script for full compatibility with standard environment variables (`POSTGRES_PASSWORD`, `POSTGRES_USER`, etc.).
+- **Health Checks**: Built-in health check using `pg_isready`.
+
+## Environment Variables
+
+Supports all [standard PostgreSQL environment variables](https://hub.docker.com/_/postgres):
+
+- `POSTGRES_PASSWORD`: (Required) Password for the superuser.
+- `POSTGRES_USER`: (Optional) Default is `postgres`.
+- `POSTGRES_DB`: (Optional) Default is the same as user.
+
+
+## Building the Images
+
+To build the images, run the following command:
+
+```bash
+./build.sh > cmds.sh
+```
+
+This generates a shell building images using latest minor versions of PostgreSQL and specified versions of RDKit and Bingo. 
+
+**TODO: replace shell scrip for build tags with Python script with extended functionality**
