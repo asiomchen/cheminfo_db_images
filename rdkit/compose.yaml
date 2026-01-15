@@ -1,19 +1,15 @@
 services:
-    rdkit:
+    db:
         image: antonsiomchen/cheminfo-rdkit:rocky9-postgres16.11-rdkit2024.03.6
-        container_name: test-rocky9-postgres16-rdkit2024.03.6
         environment:
-            - POSTGRES_PASSWORD=postgres
-            - POSTGRES_USER=postgres
-            - POSTGRES_DB=postgres
+            - POSTGRES_PASSWORD=anton
+            - POSTGRES_USER=anton
+            - POSTGRES_DB=anton
         ports:
             - "5432:5432"
         volumes:
-            - data:/var/lib/postgresql/data
+            - ./init-molecules.sql:/docker-entrypoint-initdb.d/init-molecules.sql
 
-# volume is external
-volumes:
-    data:
-        external: true
-    
-            
+# # volume is external
+# volumes:
+#     data:
