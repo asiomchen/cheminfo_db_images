@@ -14,6 +14,8 @@ on:
         required: true
       DOCKERHUB_TOKEN:
         required: true
+      DOCKERHUB_PASSWORD:
+        required: true
 
 env:
   DOCKER_USER: antonsiomchen
@@ -252,6 +254,6 @@ jobs:
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
           repository: antonsiomchen/cheminfo-db
           readme-filepath: docker-hub-summary.md
