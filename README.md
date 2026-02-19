@@ -9,8 +9,7 @@
 
 Yet another PostgreSQL images with pre-installed **RDKit** or **Bingo** extensions, built on **Rocky Linux 9**.
 
-
-**Currently supports only Linux x86_64 architecture, arm64 support will be added later**
+Supports **linux/amd64** and **linux/arm64** architectures.
 
 ## Quick Start
 
@@ -42,7 +41,8 @@ We provide flexible tagging to suit your needs:
 
 | Component | Versions |
 | :--- | :--- |
-| **PostgreSQL** | 15, 16, 17, 18 |
+| **PostgreSQL (RDKit)** | 16, 17, 18 |
+| **PostgreSQL (Bingo)** | 15, 16, 17 |
 | **RDKit** | 2024.03.6, 2024.09.4, 2025.03.6, 2025.09.4 |
 | **Bingo** | 1.34.0, 1.35.0, 1.36.0 |
 
@@ -70,6 +70,4 @@ To build the images, run the following command:
 ./build.sh > cmds.sh
 ```
 
-This generates a shell building images using latest minor versions of PostgreSQL and specified versions of RDKit and Bingo. 
-
-**TODO: replace shell scrip for build tags with Python script with extended functionality**
+This generates a shell building images using latest minor versions of PostgreSQL and specified versions of RDKit and Bingo.

@@ -1,0 +1,172 @@
+name: RDKit Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        required: true
+        type: string
+      merge_matrix:
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+
+env:
+  DOCKER_USER: antonsiomchen
+  IMAGE_NAME: cheminfo-db
+  ROCKY_VERSION: "9"
+  BOOST_VERSION: "1.84.0"
+
+jobs:
+  build:
+    name: Build postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image (local for testing)
+        run: |
+          LOCAL_TAG="rdkit-test:${{ matrix.pg_minor }}-${{ matrix.rdkit_clean }}"
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
+            --build-arg BOOST_VERSION="${BOOST_VERSION}" \
+            --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
+            --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
+            --build-arg RDKIT_GIT_REF="${{ matrix.rdkit_ref }}" \
+            -t "${LOCAL_TAG}" \
+            --load \
+            -f rdkit/Dockerfile rdkit/
+
+      - name: Test image
+        run: |
+          LOCAL_TAG="rdkit-test:${{ matrix.pg_minor }}-${{ matrix.rdkit_clean }}"
+          CONTAINER="test-rdkit-${{ matrix.pg_minor }}-${{ matrix.arch }}"
+
+          docker run -d \
+            --name "${CONTAINER}" \
+            -e POSTGRES_PASSWORD=postgres \
+            "${LOCAL_TAG}"
+
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in $(seq 1 60); do
+            if docker exec "${CONTAINER}" pg_isready -U postgres 2>/dev/null; then
+              echo "PostgreSQL is ready after ${i}s"
+              break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Timed out waiting for PostgreSQL"
+              docker logs "${CONTAINER}"
+              docker stop "${CONTAINER}" && docker rm "${CONTAINER}"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker exec "${CONTAINER}" psql -U postgres -c "SELECT rdkit_version();"
+          docker exec "${CONTAINER}" psql -U postgres -c "SELECT mol_logp(mol_from_smiles('CCO'));"
+
+          docker stop "${CONTAINER}"
+          docker rm "${CONTAINER}"
+
+      - name: Push image by digest
+        run: |
+          REPO="${DOCKER_USER}/${IMAGE_NAME}"
+          mkdir -p /tmp/digests
+
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
+            --build-arg BOOST_VERSION="${BOOST_VERSION}" \
+            --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
+            --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
+            --build-arg RDKIT_GIT_REF="${{ matrix.rdkit_ref }}" \
+            --output "type=image,name=${REPO},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file /tmp/metadata.json \
+            -f rdkit/Dockerfile rdkit/
+
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/metadata.json)
+          echo "Pushed digest: ${DIGEST}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.pg_minor }}-${{ matrix.rdkit_clean }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-manifest:
+    name: Merge manifests for postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.merge_matrix) }}
+    steps:
+      - name: Download digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-${{ matrix.pg_minor }}-${{ matrix.rdkit_clean }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifests
+        run: |
+          BASE="${DOCKER_USER}/${IMAGE_NAME}"
+          MINOR="${{ matrix.pg_minor }}"
+          MAJOR="${{ matrix.pg_major }}"
+          RDKIT="${{ matrix.rdkit_clean }}"
+
+          IMAGES=""
+          for digest_file in /tmp/digests/*; do
+            digest=$(basename "${digest_file}")
+            IMAGES="${IMAGES} ${BASE}@sha256:${digest}"
+          done
+
+          # canonical full tag
+          docker buildx imagetools create \
+            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}" \
+            ${IMAGES}
+
+          # full tag with major PG version
+          docker buildx imagetools create \
+            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MAJOR}-rdkit${RDKIT}" \
+            ${IMAGES}
+
+          # simplified tags (no OS prefix, rocky9 is the only supported OS)
+          docker buildx imagetools create \
+            -t "${BASE}:postgres${MAJOR}-rdkit${RDKIT}" \
+            ${IMAGES}
+
+          docker buildx imagetools create \
+            -t "${BASE}:postgres${MINOR}-rdkit${RDKIT}" \
+            ${IMAGES}

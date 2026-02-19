@@ -9,7 +9,6 @@ env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
-  BOOST_VERSION: "1.84.0"
 
 jobs:
   detect-versions:
@@ -116,121 +115,13 @@ jobs:
             echo "has_builds=${has_builds}"
           } >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}-${{ matrix.arch }}
+  build-and-push:
     needs: detect-versions
     if: needs.detect-versions.outputs.has_builds == 'true'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.detect-versions.outputs.matrix) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build image
-        run: |
-          ARCH_TAG="rocky${ROCKY_VERSION}-postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}-${{ matrix.arch }}"
-          docker buildx build \
-            --platform ${{ matrix.platform }} \
-            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
-            --build-arg BOOST_VERSION="${BOOST_VERSION}" \
-            --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
-            --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
-            --build-arg RDKIT_GIT_REF="${{ matrix.rdkit_ref }}" \
-            -t "${DOCKER_USER}/${IMAGE_NAME}:${ARCH_TAG}" \
-            --load \
-            -f rdkit/Dockerfile rdkit/
-
-      - name: Test image
-        run: |
-          ARCH_TAG="rocky${ROCKY_VERSION}-postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}-${{ matrix.arch }}"
-          CONTAINER="test-rdkit-${{ matrix.pg_minor }}-${{ matrix.arch }}"
-
-          docker run -d \
-            --name "${CONTAINER}" \
-            -e POSTGRES_PASSWORD=postgres \
-            "${DOCKER_USER}/${IMAGE_NAME}:${ARCH_TAG}"
-
-          echo "Waiting for PostgreSQL to be ready..."
-          for i in $(seq 1 60); do
-            if docker exec "${CONTAINER}" pg_isready -U postgres 2>/dev/null; then
-              echo "PostgreSQL is ready after ${i}s"
-              break
-            fi
-            if [ "$i" = "60" ]; then
-              echo "Timed out waiting for PostgreSQL"
-              docker logs "${CONTAINER}"
-              docker stop "${CONTAINER}" && docker rm "${CONTAINER}"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          docker exec "${CONTAINER}" psql -U postgres -c "SELECT rdkit_version();"
-          docker exec "${CONTAINER}" psql -U postgres -c "SELECT mol_logp(mol_from_smiles('CCO'));"
-
-          docker stop "${CONTAINER}"
-          docker rm "${CONTAINER}"
-
-      - name: Push per-arch image
-        run: |
-          ARCH_TAG="rocky${ROCKY_VERSION}-postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}-${{ matrix.arch }}"
-          docker push "${DOCKER_USER}/${IMAGE_NAME}:${ARCH_TAG}"
-
-  merge-manifest:
-    name: Merge manifests for postgres${{ matrix.pg_minor }}-rdkit${{ matrix.rdkit_clean }}
-    needs: [detect-versions, build]
-    if: needs.detect-versions.outputs.has_builds == 'true'
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.detect-versions.outputs.merge_matrix) }}
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create and push multi-arch manifests
-        run: |
-          BASE="${DOCKER_USER}/${IMAGE_NAME}"
-          MINOR="${{ matrix.pg_minor }}"
-          MAJOR="${{ matrix.pg_major }}"
-          RDKIT="${{ matrix.rdkit_clean }}"
-
-          SRC_AMD64="${BASE}:rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}-amd64"
-          SRC_ARM64="${BASE}:rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}-arm64"
-
-          # canonical full tag
-          docker buildx imagetools create \
-            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}" \
-            "${SRC_AMD64}" "${SRC_ARM64}"
-
-          # full tag with major PG version
-          docker buildx imagetools create \
-            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MAJOR}-rdkit${RDKIT}" \
-            "${SRC_AMD64}" "${SRC_ARM64}"
-
-          # simplified tags (no OS prefix, rocky9 is the only supported OS)
-          docker buildx imagetools create \
-            -t "${BASE}:postgres${MAJOR}-rdkit${RDKIT}" \
-            "${SRC_AMD64}" "${SRC_ARM64}"
-
-          docker buildx imagetools create \
-            -t "${BASE}:postgres${MINOR}-rdkit${RDKIT}" \
-            "${SRC_AMD64}" "${SRC_ARM64}"
+    uses: ./.github/workflows/rdkit-reusable.yml
+    with:
+      matrix: ${{ needs.detect-versions.outputs.matrix }}
+      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
