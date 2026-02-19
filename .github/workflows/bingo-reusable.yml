@@ -1,0 +1,187 @@
+name: Bingo Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+
+env:
+  DOCKER_USER: antonsiomchen
+  IMAGE_NAME: cheminfo-db
+  ROCKY_VERSION: "9"
+
+jobs:
+  build:
+    name: Build postgres${{ matrix.pg_minor }}-bingo${{ matrix.bingo_version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image (local for testing)
+        run: |
+          LOCAL_TAG="bingo-test:${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
+            --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
+            --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
+            --build-arg BINGO_VERSION="${{ matrix.bingo_version }}" \
+            -t "${LOCAL_TAG}" \
+            --load \
+            -f bingo/Dockerfile bingo/
+
+      - name: Test image
+        run: |
+          LOCAL_TAG="bingo-test:${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
+          CONTAINER="test-bingo-${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
+
+          docker run -d \
+            --name "${CONTAINER}" \
+            -e POSTGRES_PASSWORD=postgres \
+            "${LOCAL_TAG}"
+
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in $(seq 1 60); do
+            if docker exec "${CONTAINER}" pg_isready -U postgres 2>/dev/null; then
+              echo "PostgreSQL is ready after ${i}s"
+              break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Timed out waiting for PostgreSQL"
+              docker logs "${CONTAINER}"
+              docker stop "${CONTAINER}" && docker rm "${CONTAINER}"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker exec "${CONTAINER}" psql -U postgres -c "SELECT bingo.GetVersion();"
+
+          docker stop "${CONTAINER}"
+          docker rm "${CONTAINER}"
+
+      - name: Push image with all tags
+        run: |
+          REPO="${DOCKER_USER}/${IMAGE_NAME}"
+          MINOR="${{ matrix.pg_minor }}"
+          MAJOR="${{ matrix.pg_major }}"
+          BINGO="${{ matrix.bingo_version }}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
+            --build-arg POSTGRES_VERSION="${MINOR}" \
+            --build-arg POSTGRES_MAJOR_VERSION="${MAJOR}" \
+            --build-arg BINGO_VERSION="${BINGO}" \
+            -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MINOR}-bingo${BINGO}" \
+            -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MAJOR}-bingo${BINGO}" \
+            -t "${REPO}:postgres${MAJOR}-bingo${BINGO}" \
+            -t "${REPO}:postgres${MINOR}-bingo${BINGO}" \
+            --push \
+            -f bingo/Dockerfile bingo/
+
+  update-docs:
+    name: Update README and Docker Hub description
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Query Docker Hub and update version files
+        run: |
+          python3 << 'PYEOF'
+          import json, re, sys, urllib.request
+
+          def fetch_json(url):
+              with urllib.request.urlopen(url) as resp:
+                  return json.loads(resp.read())
+
+          def get_bingo_versions():
+              versions = set()
+              url = "https://hub.docker.com/v2/repositories/antonsiomchen/cheminfo-db/tags/?page_size=100"
+              pattern = re.compile(r'^rocky9-postgres\d+\.\d+-bingo(\d+\.\d+\.\d+)$')
+              while url:
+                  data = fetch_json(url)
+                  for tag_info in data.get("results", []):
+                      m = pattern.match(tag_info["name"])
+                      if m:
+                          versions.add(m.group(1))
+                  url = data.get("next")
+              return sorted(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
+
+          versions = get_bingo_versions()
+          if not versions:
+              print("No Bingo versions found on Docker Hub, skipping update")
+              sys.exit(0)
+
+          latest = versions[-1]
+          parts = [f"**{v} (latest)**" if v == latest else v for v in versions]
+          versions_str = ", ".join(parts)
+          print(f"Found versions: {versions_str}")
+
+          with open("README.md") as f:
+              content = f.read()
+          new_content = re.sub(
+              r'(\| \*\*Bingo\*\* \| ).*?( \|)',
+              rf'\g<1>{versions_str}\g<2>',
+              content,
+          )
+          if new_content != content:
+              with open("README.md", "w") as f:
+                  f.write(new_content)
+              print("Updated README.md")
+          else:
+              print("README.md unchanged")
+
+          with open("docker-hub-summary.md") as f:
+              content = f.read()
+          new_content = re.sub(
+              r'(### Bingo Versions\n- ).*',
+              rf'\g<1>{versions_str}',
+              content,
+          )
+          if new_content != content:
+              with open("docker-hub-summary.md", "w") as f:
+                  f.write(new_content)
+              print("Updated docker-hub-summary.md")
+          else:
+              print("docker-hub-summary.md unchanged")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md docker-hub-summary.md
+          git diff --staged --quiet || (git commit -m "docs: update supported Bingo versions" && git push)
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: antonsiomchen/cheminfo-db
+          readme-filepath: docker-hub-summary.md

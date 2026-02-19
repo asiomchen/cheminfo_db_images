@@ -1,0 +1,130 @@
+name: Build Bingo Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 5'
+
+permissions:
+  contents: write
+
+env:
+  DOCKER_USER: antonsiomchen
+  IMAGE_NAME: cheminfo-db
+  ROCKY_VERSION: "9"
+  PG_MAJORS: "15 16 17"
+
+jobs:
+  detect-versions:
+    name: Detect versions and find missing builds
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      has_builds: ${{ steps.detect.outputs.has_builds }}
+    steps:
+      - name: Detect versions and check Docker Hub
+        id: detect
+        run: |
+          python3 << 'EOF'
+          import json, os, re, urllib.request
+
+          DOCKER_USER = os.environ["DOCKER_USER"]
+          IMAGE_NAME  = os.environ["IMAGE_NAME"]
+          ROCKY_VERSION = os.environ["ROCKY_VERSION"]
+          PG_MAJORS   = os.environ["PG_MAJORS"].split()
+
+          EPAM_BASE = "https://lifescience.opensource.epam.com"
+
+          def fetch_json(url):
+              with urllib.request.urlopen(url) as resp:
+                  return json.loads(resp.read())
+
+          def get_latest_pg_minor(major):
+              url = f"https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&name={major}."
+              data = fetch_json(url)
+              pattern = re.compile(r'^' + re.escape(str(major)) + r'\.\d+$')
+              tags = [r["name"] for r in data["results"] if pattern.match(r["name"])]
+              tags.sort(key=lambda s: [int(u) for u in s.split(".")])
+              return tags[-1] if tags else None
+
+          def get_latest_bingo_version():
+              url = f"{EPAM_BASE}/download/bingo.html"
+              with urllib.request.urlopen(url) as resp:
+                  html = resp.read().decode()
+              versions = re.findall(r'href="bingo/bingo-(\d+\.\d+\.\d+)\.html"', html)
+              versions = list(set(versions))
+              versions.sort(key=lambda v: tuple(int(x) for x in v.split(".")))
+              return versions[-1] if versions else None
+
+          def binary_exists(bingo_ver, pg_major):
+              url = f"{EPAM_BASE}/downloads/bingo-{bingo_ver}/bingo-postgres-{pg_major}-linux-x86_64.zip"
+              req = urllib.request.Request(url, method="HEAD")
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      return resp.status == 200
+              except (urllib.error.HTTPError, urllib.error.URLError):
+                  return False
+
+          def tag_exists(tag):
+              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
+              req = urllib.request.Request(url, method="HEAD")
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      return resp.status == 200
+              except urllib.error.HTTPError as e:
+                  return e.code != 404
+
+          def main():
+              latest_bingo = get_latest_bingo_version()
+              if not latest_bingo:
+                  print("ERROR: Could not detect any Bingo version from EPAM page", flush=True)
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                      f.write("matrix={\"include\":[]}\n")
+                      f.write("has_builds=false\n")
+                  return
+              print(f"Latest Bingo version detected: {latest_bingo}", flush=True)
+
+              matrix_entries = []
+
+              for major in PG_MAJORS:
+                  minor = get_latest_pg_minor(major)
+                  print(f"PG{major} latest minor: {minor}", flush=True)
+                  if not minor:
+                      continue
+
+                  if not binary_exists(latest_bingo, major):
+                      print(f"  -> No binary for Bingo {latest_bingo} + PG{major}, skipping", flush=True)
+                      continue
+
+                  tag = f"rocky{ROCKY_VERSION}-postgres{minor}-bingo{latest_bingo}"
+                  print(f"Checking Docker Hub for: {tag}", flush=True)
+                  if tag_exists(tag):
+                      print(f"  -> exists, skipping", flush=True)
+                      continue
+                  print(f"  -> missing, will build", flush=True)
+                  matrix_entries.append({
+                      "pg_minor":      minor,
+                      "pg_major":      major,
+                      "bingo_version": latest_bingo,
+                  })
+
+              has_builds = len(matrix_entries) > 0
+              matrix = json.dumps({"include": matrix_entries})
+              print(f"has_builds={has_builds}, {len(matrix_entries)} combos to build", flush=True)
+
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"matrix={matrix}\n")
+                  f.write(f"has_builds={'true' if has_builds else 'false'}\n")
+
+          main()
+          EOF
+
+  build-and-push:
+    needs: detect-versions
+    if: needs.detect-versions.outputs.has_builds == 'true'
+    uses: ./.github/workflows/bingo-reusable.yml
+    with:
+      matrix: ${{ needs.detect-versions.outputs.matrix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
