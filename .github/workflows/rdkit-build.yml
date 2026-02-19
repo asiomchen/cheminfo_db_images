@@ -3,7 +3,10 @@ name: Build RDKit Images
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * 6'
+
+permissions:
+  contents: write
 
 env:
   DOCKER_USER: antonsiomchen
