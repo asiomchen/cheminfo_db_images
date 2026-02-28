@@ -43,7 +43,7 @@ We provide flexible tagging to suit your needs:
 | :--- | :--- |
 | **PostgreSQL (RDKit)** | 16, 17, 18 |
 | **PostgreSQL (Bingo)** | 15, 16, 17 |
-| **RDKit** | 2024.03.6, 2024.09.4, 2025.03.6, 2025.09.4, **2025.09.5 (latest)** |
+| **RDKit** | 2024.03.6, 2024.09.4, 2025.03.6, 2025.09.4, 2025.09.5, **2025.09.6 (latest)** |
 | **Bingo** | 1.34.0, 1.35.0, 1.36.0, **1.40.0 (latest)** |
 
 ## Key Features
