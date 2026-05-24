@@ -7,6 +7,10 @@ on:
         description: 'Minimum RDKit version to build (e.g. 2024.03.6)'
         required: false
         default: '2024.03.6'
+      max_rdkit_version:
+        description: 'Maximum RDKit version to build (e.g. 2025.09.1)'
+        required: false
+        default: ''
   # schedule:
   #   - cron: '0 6 * * *'
 
@@ -18,7 +22,6 @@ env:
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
   PG_MAJORS: "16 17 18"
-  MIN_RDKIT_VERSION: "2024.03.6"
 
 jobs:
   detect-versions:
@@ -34,6 +37,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
+          MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
         run: |
           python3 << 'EOF'
           import json, os, re, urllib.request
@@ -43,7 +47,8 @@ jobs:
           ROCKY_VERSION = os.environ["ROCKY_VERSION"]
           PG_MAJORS   = os.environ["PG_MAJORS"].split()
           GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-          MIN_VERSION = os.environ.get("MIN_RDKIT_VERSION_INPUT") or os.environ["MIN_RDKIT_VERSION"]
+          MIN_VERSION = os.environ.get("MIN_RDKIT_VERSION_INPUT") or "2024.03.6"
+          MAX_VERSION = os.environ.get("MAX_RDKIT_VERSION_INPUT") or None
 
           def fetch_json(url, headers=None):
               req = urllib.request.Request(url, headers=headers or {})
@@ -61,8 +66,9 @@ jobs:
           def version_tuple(v):
               return tuple(int(x) for x in v.split("."))
 
-          def get_rdkit_releases(min_version):
+          def get_rdkit_releases(min_version, max_version=None):
               min_v = version_tuple(min_version)
+              max_v = version_tuple(max_version) if max_version else None
               pattern = re.compile(r'^Release_\d{4}_\d{2}_\d+$')
               headers = {
                   "Authorization": f"token {GITHUB_TOKEN}",
@@ -76,9 +82,10 @@ jobs:
                       if not pattern.match(tag):
                           continue
                       clean = tag.replace("Release_", "").replace("_", ".")
-                      if version_tuple(clean) >= min_v:
+                      clean_v = version_tuple(clean)
+                      if clean_v >= min_v and (max_v is None or clean_v <= max_v):
                           releases.append({"ref": tag, "clean": clean})
-              return releases
+              return sorted(releases, key=lambda r: version_tuple(r["clean"]))
 
           def tag_exists(tag):
               url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
@@ -94,10 +101,15 @@ jobs:
               for major in PG_MAJORS:
                   minor = get_latest_pg_minor(major)
                   print(f"PG{major} latest minor: {minor}", flush=True)
+                  if not minor:
+                      continue
                   pg_minors[major] = minor
 
-              rdkit_releases = get_rdkit_releases(MIN_VERSION)
-              print(f"RDKit releases >= {MIN_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+              rdkit_releases = get_rdkit_releases(MIN_VERSION, MAX_VERSION)
+              if MAX_VERSION:
+                  print(f"RDKit releases from {MIN_VERSION} to {MAX_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+              else:
+                  print(f"RDKit releases >= {MIN_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
 
               matrix_entries = []
               merge_entries  = []
