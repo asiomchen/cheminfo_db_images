@@ -107,6 +107,9 @@ jobs:
     name: Update README and Docker Hub description
     needs: build
     runs-on: ubuntu-24.04
+    concurrency:
+      group: cheminfo-docs-update
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:

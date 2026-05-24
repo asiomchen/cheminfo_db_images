@@ -11,6 +11,8 @@ on:
         description: 'Maximum Bingo version to build (e.g. 1.36.0)'
         required: false
         default: ''
+  schedule:
+    - cron: '0 5 * * *'
 
 permissions:
   contents: write
