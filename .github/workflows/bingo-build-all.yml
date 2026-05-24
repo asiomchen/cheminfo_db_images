@@ -7,6 +7,10 @@ on:
         description: 'Minimum Bingo version to build (e.g. 1.34.0)'
         required: false
         default: '1.34.0'
+      max_bingo_version:
+        description: 'Maximum Bingo version to build (e.g. 1.36.0)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -16,7 +20,6 @@ env:
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
   PG_MAJORS: "15 16 17"
-  BINGO_VERSIONS: "1.34.0 1.35.0 1.36.0"
 
 jobs:
   detect-versions:
@@ -30,6 +33,7 @@ jobs:
         id: detect
         env:
           MIN_BINGO_VERSION_INPUT: ${{ inputs.min_bingo_version }}
+          MAX_BINGO_VERSION_INPUT: ${{ inputs.max_bingo_version }}
         run: |
           python3 << 'EOF'
           import json, os, re, urllib.request
@@ -38,8 +42,10 @@ jobs:
           IMAGE_NAME  = os.environ["IMAGE_NAME"]
           ROCKY_VERSION = os.environ["ROCKY_VERSION"]
           PG_MAJORS   = os.environ["PG_MAJORS"].split()
-          BINGO_VERSIONS = os.environ["BINGO_VERSIONS"].split()
           MIN_VERSION = os.environ.get("MIN_BINGO_VERSION_INPUT") or "1.34.0"
+          MAX_VERSION = os.environ.get("MAX_BINGO_VERSION_INPUT") or None
+
+          EPAM_BASE = "https://lifescience.opensource.epam.com"
 
           def fetch_json(url):
               with urllib.request.urlopen(url) as resp:
@@ -56,6 +62,22 @@ jobs:
           def version_tuple(v):
               return tuple(int(x) for x in v.split("."))
 
+          def get_bingo_versions():
+              url = f"{EPAM_BASE}/download/bingo.html"
+              with urllib.request.urlopen(url) as resp:
+                  html = resp.read().decode()
+              versions = set(re.findall(r'href="bingo/bingo-(\d+\.\d+\.\d+)\.html"', html))
+              return sorted(versions, key=version_tuple)
+
+          def binary_exists(bingo_ver, pg_major):
+              url = f"{EPAM_BASE}/downloads/bingo-{bingo_ver}/bingo-postgres-{pg_major}-linux-x86_64.zip"
+              req = urllib.request.Request(url, method="HEAD")
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      return resp.status == 200
+              except (urllib.error.HTTPError, urllib.error.URLError):
+                  return False
+
           def tag_exists(tag):
               url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
               req = urllib.request.Request(url, method="HEAD")
@@ -67,19 +89,34 @@ jobs:
 
           def main():
               min_v = version_tuple(MIN_VERSION)
-              filtered_versions = [v for v in BINGO_VERSIONS if version_tuple(v) >= min_v]
-              print(f"Bingo versions >= {MIN_VERSION}: {filtered_versions}", flush=True)
+              max_v = version_tuple(MAX_VERSION) if MAX_VERSION else None
+
+              versions = get_bingo_versions()
+              filtered_versions = [
+                  v for v in versions
+                  if version_tuple(v) >= min_v and (max_v is None or version_tuple(v) <= max_v)
+              ]
+              if MAX_VERSION:
+                  print(f"Bingo versions from {MIN_VERSION} to {MAX_VERSION}: {filtered_versions}", flush=True)
+              else:
+                  print(f"Bingo versions >= {MIN_VERSION}: {filtered_versions}", flush=True)
 
               pg_minors = {}
               for major in PG_MAJORS:
                   minor = get_latest_pg_minor(major)
                   print(f"PG{major} latest minor: {minor}", flush=True)
+                  if not minor:
+                      continue
                   pg_minors[major] = minor
 
               matrix_entries = []
 
               for major, minor in pg_minors.items():
                   for bingo_version in filtered_versions:
+                      if not binary_exists(bingo_version, major):
+                          print(f"  -> No binary for Bingo {bingo_version} + PG{major}, skipping", flush=True)
+                          continue
+
                       tag = f"rocky{ROCKY_VERSION}-postgres{minor}-bingo{bingo_version}"
                       print(f"Checking: {tag}", flush=True)
                       if tag_exists(tag):
