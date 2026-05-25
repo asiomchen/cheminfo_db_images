@@ -22,6 +22,7 @@ env:
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
   BOOST_VERSION: "1.84.0"
+  MANIFEST_PUSH_DELAY_SECONDS: "10"
 
 jobs:
   build:
@@ -154,24 +155,25 @@ jobs:
             IMAGES="${IMAGES} ${BASE}@sha256:${digest}"
           done
 
-          # canonical full tag
-          docker buildx imagetools create \
-            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}" \
-            ${IMAGES}
+          TAGS=(
+            "rocky${ROCKY_VERSION}-postgres${MINOR}-rdkit${RDKIT}"
+            "rocky${ROCKY_VERSION}-postgres${MAJOR}-rdkit${RDKIT}"
+            "postgres${MAJOR}-rdkit${RDKIT}"
+            "postgres${MINOR}-rdkit${RDKIT}"
+          )
 
-          # full tag with major PG version
-          docker buildx imagetools create \
-            -t "${BASE}:rocky${ROCKY_VERSION}-postgres${MAJOR}-rdkit${RDKIT}" \
-            ${IMAGES}
+          for i in "${!TAGS[@]}"; do
+            tag="${TAGS[$i]}"
+            echo "Publishing manifest ${tag}"
+            docker buildx imagetools create \
+              -t "${BASE}:${tag}" \
+              ${IMAGES}
 
-          # simplified tags (no OS prefix, rocky9 is the only supported OS)
-          docker buildx imagetools create \
-            -t "${BASE}:postgres${MAJOR}-rdkit${RDKIT}" \
-            ${IMAGES}
-
-          docker buildx imagetools create \
-            -t "${BASE}:postgres${MINOR}-rdkit${RDKIT}" \
-            ${IMAGES}
+            if [ "$i" -lt "$(( ${#TAGS[@]} - 1 ))" ]; then
+              echo "Sleeping ${MANIFEST_PUSH_DELAY_SECONDS}s to avoid Docker Hub rate limits"
+              sleep "${MANIFEST_PUSH_DELAY_SECONDS}"
+            fi
+          done
 
   update-docs:
     name: Update README and Docker Hub description
