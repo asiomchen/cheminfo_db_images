@@ -6,7 +6,7 @@ on:
       min_rdkit_version:
         description: 'Minimum RDKit version to build (e.g. 2024.03.6)'
         required: false
-        default: '2024.03.6'
+        default: '2025.03.1'
       max_rdkit_version:
         description: 'Maximum RDKit version to build (e.g. 2025.09.1)'
         required: false
