@@ -1,0 +1,123 @@
+name: Build Bingo Dist Images
+
+on:
+  workflow_dispatch:
+
+env:
+  DOCKER_USER: antonsiomchen
+  IMAGE_NAME: bingo-dist
+  PG_MAJORS: "15 16 17"
+
+jobs:
+  detect-versions:
+    name: Detect versions and find missing builds
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
+      has_builds: ${{ steps.detect.outputs.has_builds }}
+    steps:
+      - name: Detect versions and check Docker Hub
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 << 'EOF'
+          import json, os, re, urllib.request
+
+          DOCKER_USER = os.environ["DOCKER_USER"]
+          IMAGE_NAME = os.environ["IMAGE_NAME"]
+          PG_MAJORS = os.environ["PG_MAJORS"].split()
+          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+
+          def fetch_json(url, headers=None):
+              req = urllib.request.Request(url, headers=headers or {})
+              with urllib.request.urlopen(req) as resp:
+                  return json.loads(resp.read())
+
+          def get_latest_bingo_release():
+              headers = {
+                  "Authorization": f"token {GITHUB_TOKEN}",
+                  "Accept": "application/vnd.github.v3+json",
+              }
+              release = fetch_json(
+                  "https://api.github.com/repos/epam/Indigo/releases/latest",
+                  headers,
+              )
+              tag = release["tag_name"]
+              match = re.fullmatch(r"indigo-(\d+\.\d+\.\d+)", tag)
+              if not match:
+                  raise RuntimeError(f"Unexpected Indigo tag format: {tag}")
+              version_url = (
+                  f"https://raw.githubusercontent.com/epam/Indigo/{tag}/.ci/version.txt"
+              )
+              version_txt = urllib.request.urlopen(version_url).read().decode()
+              lines = [line.strip() for line in version_txt.splitlines() if line.strip()]
+              if not lines:
+                  raise RuntimeError(f"Unexpected version.txt format for {tag}")
+              bingo_version = lines[0]
+              return tag, bingo_version
+
+          def tag_exists(tag):
+              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
+              req = urllib.request.Request(url, method="HEAD")
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      return resp.status == 200
+              except urllib.error.HTTPError as e:
+                  return e.code != 404
+
+          def main():
+              indigo_ref, bingo_version = get_latest_bingo_release()
+              print(f"Latest Bingo release: {indigo_ref} -> {bingo_version}", flush=True)
+
+              matrix_entries = []
+              merge_entries = []
+
+              for pg_major in PG_MAJORS:
+                  tag = f"{bingo_version}-postgres{pg_major}"
+                  print(f"Checking: {tag}", flush=True)
+                  if tag_exists(tag):
+                      print("  -> exists, skipping", flush=True)
+                      continue
+
+                  print("  -> missing, will build", flush=True)
+                  for arch, runner, platform in [
+                      ("amd64", "ubuntu-24.04", "linux/amd64"),
+                      ("arm64", "ubuntu-24.04-arm", "linux/arm64"),
+                  ]:
+                      matrix_entries.append({
+                          "pg_major": pg_major,
+                          "indigo_ref": indigo_ref,
+                          "bingo_version": bingo_version,
+                          "arch": arch,
+                          "runner": runner,
+                          "platform": platform,
+                      })
+                  merge_entries.append({
+                      "pg_major": pg_major,
+                      "bingo_version": bingo_version,
+                  })
+
+              has_builds = len(matrix_entries) > 0
+              matrix = json.dumps({"include": matrix_entries})
+              merge_matrix = json.dumps({"include": merge_entries})
+
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"matrix={matrix}\n")
+                  f.write(f"merge_matrix={merge_matrix}\n")
+                  f.write(f"has_builds={'true' if has_builds else 'false'}\n")
+
+          main()
+          EOF
+
+  build-and-push:
+    needs: detect-versions
+    if: needs.detect-versions.outputs.has_builds == 'true'
+    uses: ./.github/workflows/bingo-dist-reusable.yml
+    with:
+      matrix: ${{ needs.detect-versions.outputs.matrix }}
+      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
