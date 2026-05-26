@@ -1,4 +1,4 @@
-name: Bingo Dist Testing Build (Reusable)
+name: Bingo Dist Build (Reusable)
 
 on:
   workflow_call:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   build:
-    name: Build test dist ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}
+    name: Build dist ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -44,7 +44,7 @@ jobs:
 
       - name: Build image locally for archive validation
         run: |
-          LOCAL_TAG="bingo-dist-test:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
+          LOCAL_TAG="bingo-dist:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
@@ -57,17 +57,61 @@ jobs:
 
       - name: Validate built archive contents
         run: |
-          LOCAL_TAG="bingo-dist-test:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
+          set -euo pipefail
+
+          LOCAL_TAG="bingo-dist:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
           CONTAINER="test-bingo-dist-${{ matrix.pg_major }}-${{ matrix.arch }}"
 
-          docker run -d --name "${CONTAINER}" "${LOCAL_TAG}" sh -lc "sleep 600"
-          docker exec "${CONTAINER}" test -f /out/bingo-postgres.tgz
-          docker exec "${CONTAINER}" sh -lc "tar -tzf /out/bingo-postgres.tgz > /tmp/archive-contents.txt"
-          docker exec "${CONTAINER}" grep -E '(^|/)bingo-pg-install.sh$' /tmp/archive-contents.txt
-          docker exec "${CONTAINER}" grep -E '(^|/)bingo_install.sql$' /tmp/archive-contents.txt
-          docker exec "${CONTAINER}" grep -E '(^|/)lib/libbingo-postgres.so$' /tmp/archive-contents.txt
-          docker stop "${CONTAINER}"
-          docker rm "${CONTAINER}"
+          cleanup() {
+            docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+          }
+
+          dump_debug() {
+            set +e
+            echo "::group::Validation debug"
+            echo "Container: ${CONTAINER}"
+            echo "Image: ${LOCAL_TAG}"
+            docker ps -a --filter "name=^${CONTAINER}$" || true
+            docker logs "${CONTAINER}" 2>&1 || true
+            docker exec "${CONTAINER}" sh -lc 'echo "/out contents:"; ls -lah /out || true' || true
+            docker exec "${CONTAINER}" sh -lc 'if [ -f /out/bingo-postgres.tgz ]; then echo "Archive size:"; ls -lh /out/bingo-postgres.tgz; fi' || true
+            docker exec "${CONTAINER}" sh -lc 'if [ -f /tmp/archive-contents.txt ]; then echo "Archive listing preview:"; sed -n "1,120p" /tmp/archive-contents.txt; fi' || true
+            echo "::endgroup::"
+            set -e
+          }
+
+          fail_check() {
+            printf '%s\n' "Validation failed: $1" >&2
+            dump_debug
+            exit 1
+          }
+
+          run_check() {
+            local message=$1
+            shift
+            "$@" || fail_check "${message}"
+          }
+
+          trap cleanup EXIT
+
+          run_check \
+            "unable to start validation container" \
+            docker run -d --name "${CONTAINER}" "${LOCAL_TAG}" sh -lc "sleep 600"
+          run_check \
+            "missing /out/bingo-postgres.tgz" \
+            docker exec "${CONTAINER}" test -f /out/bingo-postgres.tgz
+          run_check \
+            "unable to list archive contents" \
+            docker exec "${CONTAINER}" sh -lc "tar -tzf /out/bingo-postgres.tgz > /tmp/archive-contents.txt"
+          run_check \
+            "archive does not contain bingo-pg-install.sh" \
+            docker exec "${CONTAINER}" grep -E '(^|/)bingo-pg-install.sh$' /tmp/archive-contents.txt
+          run_check \
+            "archive does not contain bingo_install.sql" \
+            docker exec "${CONTAINER}" grep -E '(^|/)bingo_install.sql$' /tmp/archive-contents.txt
+          run_check \
+            "archive does not contain lib/libbingo-postgres.so" \
+            docker exec "${CONTAINER}" grep -E '(^|/)lib/libbingo-postgres.so$' /tmp/archive-contents.txt
 
       - name: Push image by digest
         run: |

@@ -1,4 +1,4 @@
-name: Build Bingo Dist Images for Testing
+name: Build Bingo Dist Images
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ env:
 
 jobs:
   prepare-matrix:
-    name: Prepare manual testing build matrix
+    name: Prepare build matrix
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.prepare.outputs.matrix }}
@@ -103,7 +103,7 @@ jobs:
               pg_majors = parse_pg_majors(PG_MAJORS_INPUT)
 
               print(
-                  f"Manual testing build: {INDIGO_REF} -> {bingo_version}",
+                  f"Build: {INDIGO_REF} -> {bingo_version}",
                   flush=True,
               )
               print(f"Requested PostgreSQL majors: {' '.join(pg_majors)}", flush=True)
