@@ -1,62 +1,87 @@
-name: Build Bingo Dist Images
+name: Build Bingo Dist Images for Testing
 
 on:
   workflow_dispatch:
+    inputs:
+      indigo_ref:
+        description: Indigo git tag to build from, for example indigo-1.43.0
+        required: true
+        type: string
+      pg_majors:
+        description: PostgreSQL majors to build, separated by spaces or commas
+        required: false
+        default: "15 16 17"
+        type: string
 
 env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: bingo-dist
-  PG_MAJORS: "15 16 17"
 
 jobs:
-  detect-versions:
-    name: Detect versions and find missing builds
+  prepare-matrix:
+    name: Prepare manual testing build matrix
     runs-on: ubuntu-24.04
     outputs:
-      matrix: ${{ steps.detect.outputs.matrix }}
-      merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
-      has_builds: ${{ steps.detect.outputs.has_builds }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      merge_matrix: ${{ steps.prepare.outputs.merge_matrix }}
+      has_builds: ${{ steps.prepare.outputs.has_builds }}
     steps:
-      - name: Detect versions and check Docker Hub
-        id: detect
+      - name: Validate input and check Docker Hub
+        id: prepare
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INDIGO_REF: ${{ inputs.indigo_ref }}
+          PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
           python3 << 'EOF'
           import json, os, re, urllib.request
 
           DOCKER_USER = os.environ["DOCKER_USER"]
           IMAGE_NAME = os.environ["IMAGE_NAME"]
-          PG_MAJORS = os.environ["PG_MAJORS"].split()
-          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+          INDIGO_REF = os.environ["INDIGO_REF"].strip()
+          PG_MAJORS_INPUT = os.environ["PG_MAJORS_INPUT"].strip()
 
           def fetch_json(url, headers=None):
               req = urllib.request.Request(url, headers=headers or {})
               with urllib.request.urlopen(req) as resp:
                   return json.loads(resp.read())
 
-          def get_latest_bingo_release():
-              headers = {
-                  "Authorization": f"token {GITHUB_TOKEN}",
-                  "Accept": "application/vnd.github.v3+json",
-              }
-              release = fetch_json(
-                  "https://api.github.com/repos/epam/Indigo/releases/latest",
-                  headers,
-              )
-              tag = release["tag_name"]
-              match = re.fullmatch(r"indigo-(\d+\.\d+\.\d+)", tag)
+          def parse_indigo_ref(indigo_ref):
+              match = re.fullmatch(r"indigo-(\d+\.\d+\.\d+)", indigo_ref)
               if not match:
-                  raise RuntimeError(f"Unexpected Indigo tag format: {tag}")
+                  raise RuntimeError(
+                      "Unexpected Indigo tag format: "
+                      f"{indigo_ref}. Expected indigo-X.Y.Z"
+                  )
+              return match.group(1)
+
+          def parse_pg_majors(raw_value):
+              values = [value for value in re.split(r"[\s,]+", raw_value) if value]
+              if not values:
+                  raise RuntimeError("No PostgreSQL majors provided")
+
+              unique_values = []
+              seen = set()
+              for value in values:
+                  if not re.fullmatch(r"\d+", value):
+                      raise RuntimeError(
+                          f"Unexpected PostgreSQL major value: {value}"
+                      )
+                  if value not in seen:
+                      seen.add(value)
+                      unique_values.append(value)
+              return unique_values
+
+          def get_version_from_indigo(indigo_ref):
               version_url = (
-                  f"https://raw.githubusercontent.com/epam/Indigo/{tag}/.ci/version.txt"
+                  f"https://raw.githubusercontent.com/epam/Indigo/{indigo_ref}/.ci/version.txt"
               )
               version_txt = urllib.request.urlopen(version_url).read().decode()
               lines = [line.strip() for line in version_txt.splitlines() if line.strip()]
               if not lines:
-                  raise RuntimeError(f"Unexpected version.txt format for {tag}")
-              bingo_version = lines[0]
-              return tag, bingo_version
+                  raise RuntimeError(
+                      f"Unexpected version.txt format for {indigo_ref}"
+                  )
+              return lines[0]
 
           def tag_exists(tag):
               url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
@@ -68,13 +93,25 @@ jobs:
                   return e.code != 404
 
           def main():
-              indigo_ref, bingo_version = get_latest_bingo_release()
-              print(f"Latest Bingo release: {indigo_ref} -> {bingo_version}", flush=True)
+              bingo_version = parse_indigo_ref(INDIGO_REF)
+              version_from_repo = get_version_from_indigo(INDIGO_REF)
+              if version_from_repo != bingo_version:
+                  raise RuntimeError(
+                      f"Version mismatch for {INDIGO_REF}: "
+                      f"derived {bingo_version}, version.txt has {version_from_repo}"
+                  )
+              pg_majors = parse_pg_majors(PG_MAJORS_INPUT)
+
+              print(
+                  f"Manual testing build: {INDIGO_REF} -> {bingo_version}",
+                  flush=True,
+              )
+              print(f"Requested PostgreSQL majors: {' '.join(pg_majors)}", flush=True)
 
               matrix_entries = []
               merge_entries = []
 
-              for pg_major in PG_MAJORS:
+              for pg_major in pg_majors:
                   tag = f"{bingo_version}-postgres{pg_major}"
                   print(f"Checking: {tag}", flush=True)
                   if tag_exists(tag):
@@ -112,12 +149,12 @@ jobs:
           EOF
 
   build-and-push:
-    needs: detect-versions
-    if: needs.detect-versions.outputs.has_builds == 'true'
+    needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.has_builds == 'true'
     uses: ./.github/workflows/bingo-dist-reusable.yml
     with:
-      matrix: ${{ needs.detect-versions.outputs.matrix }}
-      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
+      matrix: ${{ needs.prepare-matrix.outputs.matrix }}
+      merge_matrix: ${{ needs.prepare-matrix.outputs.merge_matrix }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -1,4 +1,4 @@
-name: Bingo Dist Build (Reusable)
+name: Bingo Dist Testing Build (Reusable)
 
 on:
   workflow_call:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}
+    name: Build test dist ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -42,7 +42,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build image locally for validation
+      - name: Build image locally for archive validation
         run: |
           LOCAL_TAG="bingo-dist-test:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
           docker buildx build \
@@ -55,7 +55,7 @@ jobs:
             --load \
             -f bingo/Dockerfile.dist bingo/
 
-      - name: Validate built archive
+      - name: Validate built archive contents
         run: |
           LOCAL_TAG="bingo-dist-test:${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
           CONTAINER="test-bingo-dist-${{ matrix.pg_major }}-${{ matrix.arch }}"
@@ -97,7 +97,7 @@ jobs:
           retention-days: 1
 
   merge-manifest:
-    name: Merge manifests for ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}
+    name: Publish multi-arch test dist ${{ matrix.bingo_version }}-postgres${{ matrix.pg_major }}
     needs: build
     runs-on: ubuntu-24.04
     strategy:
