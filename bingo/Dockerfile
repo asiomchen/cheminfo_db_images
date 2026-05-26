@@ -1,21 +1,14 @@
 ARG POSTGRES_VERSION=17.6
 ARG ROCKY_VERSION=9
 ARG BINGO_VERSION=1.34.0
+ARG BINGO_DIST_IMAGE=antonsiomchen/bingo-dist:1.34.0-postgres17
 
-FROM alpine:latest AS loader
+FROM ${BINGO_DIST_IMAGE} AS loader
 ARG POSTGRES_VERSION
 ARG BINGO_VERSION
-# install unzip tar and wget
-RUN apk --no-cache add bash wget tar unzip
-WORKDIR /tmp
-
-RUN POSTGRES_MAJOR_VERSION=$(echo ${POSTGRES_VERSION} | cut -d. -f1) && \
-    wget -O bingo-postgres.zip https://lifescience.opensource.epam.com/downloads/bingo-${BINGO_VERSION}/bingo-postgres-${POSTGRES_MAJOR_VERSION}-linux-x86_64.zip
-
-RUN unzip bingo-postgres.zip && rm bingo-postgres.zip && \
-    mv bingo*tgz bingo-postgres.tgz && \
-    tar -xvzf bingo-postgres.tgz && rm bingo-postgres.tgz && \
-    mv bingo* bingo-postgres
+RUN mkdir -p /tmp && \
+    tar -xvzf /out/bingo-postgres.tgz -C /tmp && \
+    mv /tmp/bingo-postgres* /tmp/bingo-postgres
 
 
 FROM rockylinux:${ROCKY_VERSION}

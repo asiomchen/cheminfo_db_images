@@ -1,0 +1,106 @@
+ARG ROCKY_VERSION=9
+ARG POSTGRES_MAJOR_VERSION=17
+ARG BINGO_VERSION=1.43.0
+ARG INDIGO_REF=indigo-1.43.0
+
+FROM rockylinux:${ROCKY_VERSION} AS builder
+ARG POSTGRES_MAJOR_VERSION
+ARG BINGO_VERSION
+ARG INDIGO_REF
+
+LABEL org.opencontainers.image.title="Bingo PostgreSQL distribution builder" \
+    org.opencontainers.image.description="Builds a Bingo PostgreSQL distribution archive from Indigo source" \
+    org.opencontainers.image.vendor="Cheminfo" \
+    org.opencontainers.image.version="${BINGO_VERSION}" \
+    org.opencontainers.image.licenses="Apache-2.0"
+
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    case "${ARCH}" in \
+    x86_64) PGDG_ARCH='x86_64' ;; \
+    aarch64|arm64) PGDG_ARCH='aarch64' ;; \
+    *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+    esac; \
+    dnf install -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-${PGDG_ARCH}/pgdg-redhat-repo-latest.noarch.rpm"; \
+    dnf -qy module disable postgresql; \
+    dnf install -y dnf-plugins-core; \
+    dnf config-manager --set-enabled crb; \
+    dnf install -y \
+    ca-certificates \
+    cmake \
+    gcc \
+    gcc-c++ \
+    git \
+    libstdc++-static \
+    make \
+    perl-IPC-Run \
+    postgresql${POSTGRES_MAJOR_VERSION}-devel \
+    tar; \
+    dnf clean all
+
+WORKDIR /build
+
+RUN set -eux; \
+    git clone --branch "${INDIGO_REF}" --depth 1 https://github.com/epam/Indigo.git source; \
+    git -C source rev-parse HEAD; \
+    FILE_BINGO_VERSION="$(grep -v '^[[:space:]]*$' source/.ci/version.txt | head -n 1 | tr -d '\r')"; \
+    test -n "${FILE_BINGO_VERSION}"; \
+    test "${FILE_BINGO_VERSION}" = "${BINGO_VERSION}"; \
+    cat > source/bingo/bingo-version.cmake <<EOF
+set(BINGO_DEFAULT_VERSION "${FILE_BINGO_VERSION}")
+set(BINGO_MAX_REVISION 1000)
+set(BINGO_VERSION "${FILE_BINGO_VERSION}")
+set(BINGO_FULL_VERSION "${FILE_BINGO_VERSION}")
+
+message(STATUS "Bingo full version: " \${BINGO_FULL_VERSION})
+
+# Do not forget to launch build_scripts/bingo-update-version.py after changing the version because it should be \${RV} changed in the Java and .NET files as well
+
+if(\$ENV{BUILD_NUMBER})
+    set(BINGO_BUILD_VERSION \$ENV{BUILD_NUMBER})
+else()
+    set(BINGO_BUILD_VERSION 0)
+endif()
+
+set(BINGO_VERSION_EXT "\${BINGO_FULL_VERSION}")
+EOF
+
+WORKDIR /build/source
+
+RUN set -eux; \
+    mkdir build; \
+    cd build; \
+    cmake .. \
+      -DBUILD_BINGO_POSTGRES=ON \
+      -DBUILD_BINGO_SQLSERVER=OFF \
+      -DBUILD_BINGO_ORACLE=OFF \
+      -DBUILD_INDIGO=OFF \
+      -DBUILD_INDIGO_WRAPPERS=OFF \
+      -DBUILD_INDIGO_UTILS=OFF \
+      -DBUILD_BINGO_ELASTIC=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="/usr/pgsql-${POSTGRES_MAJOR_VERSION}"; \
+    cmake --build . --config Release --target package-bingo-postgres -- -j"$(nproc)"; \
+    ARCHIVE="$(find /build/source/dist -maxdepth 1 -type f -name "bingo-postgres${POSTGRES_MAJOR_VERSION}-linux-*.tgz" | head -n 1)"; \
+    test -n "${ARCHIVE}"; \
+    ARCHIVE_BASENAME="$(basename "${ARCHIVE}")"; \
+    mkdir -p /out; \
+    cp "${ARCHIVE}" "/out/${ARCHIVE_BASENAME}"; \
+    ln -s "${ARCHIVE_BASENAME}" /out/bingo-postgres.tgz
+
+FROM alpine:3.22 AS artifact
+ARG POSTGRES_MAJOR_VERSION
+ARG BINGO_VERSION
+
+LABEL org.opencontainers.image.title="Bingo PostgreSQL distribution archive" \
+    org.opencontainers.image.description="Contains a source-built Bingo PostgreSQL distribution archive for later reuse" \
+    org.opencontainers.image.vendor="Cheminfo" \
+    org.opencontainers.image.version="${BINGO_VERSION}" \
+    org.opencontainers.image.licenses="Apache-2.0" \
+    io.cheminfo.bingo.postgres-major="${POSTGRES_MAJOR_VERSION}"
+
+RUN apk add --no-cache tar
+
+COPY --from=builder /out/ /out/
+
+CMD ["/bin/sh", "-lc", "ls -lh /out && tar -tzf /out/bingo-postgres.tgz | sed -n '1,20p'"]
