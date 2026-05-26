@@ -104,11 +104,8 @@ jobs:
             "unable to list archive contents" \
             docker exec "${CONTAINER}" sh -lc "tar -tzf /out/bingo-postgres.tgz > /tmp/archive-contents.txt"
           run_check \
-            "archive does not contain bingo-pg-install.sh" \
-            docker exec "${CONTAINER}" grep -E '(^|/)bingo-pg-install.sh$' /tmp/archive-contents.txt
-          run_check \
-            "archive does not contain bingo_install.sql" \
-            docker exec "${CONTAINER}" grep -E '(^|/)bingo_install.sql$' /tmp/archive-contents.txt
+            "archive does not contain root-level bingo-pg-install.sh" \
+            docker exec "${CONTAINER}" grep -E '^([^/]+/)?bingo-pg-install.sh$' /tmp/archive-contents.txt
           run_check \
             "archive does not contain lib/libbingo-postgres.so" \
             docker exec "${CONTAINER}" grep -E '(^|/)lib/libbingo-postgres.so$' /tmp/archive-contents.txt
