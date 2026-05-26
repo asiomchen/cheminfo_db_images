@@ -71,3 +71,9 @@ To build the images, run the following command:
 ```
 
 This generates a shell building images using latest minor versions of PostgreSQL and specified versions of RDKit and Bingo.
+
+For a local final-image smoke test of Bingo using the source-built dist image, run:
+
+```bash
+cd bingo && ./test-final-local.sh
+```
