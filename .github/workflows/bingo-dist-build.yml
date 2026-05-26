@@ -125,7 +125,7 @@ jobs:
                   ]:
                       matrix_entries.append({
                           "pg_major": pg_major,
-                          "indigo_ref": indigo_ref,
+                          "indigo_ref": INDIGO_REF,
                           "bingo_version": bingo_version,
                           "arch": arch,
                           "runner": runner,
