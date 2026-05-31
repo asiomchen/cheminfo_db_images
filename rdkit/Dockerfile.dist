@@ -1,0 +1,221 @@
+ARG ROCKY_VERSION=9
+ARG POSTGRES_MAJOR_VERSION=17
+ARG RDKIT_GIT_REF=Release_2025_09_5
+ARG RDKIT_VERSION=2025.09.5
+ARG BOOST_VERSION=1.84.0
+
+FROM rockylinux:${ROCKY_VERSION} AS boost-builder
+ARG BOOST_VERSION
+ARG RDKIT_VERSION
+
+LABEL org.opencontainers.image.title="RDKit PostgreSQL distribution builder" \
+    org.opencontainers.image.description="Builds an RDKit PostgreSQL cartridge distribution archive from source" \
+    org.opencontainers.image.vendor="Cheminfo" \
+    org.opencontainers.image.version="${RDKIT_VERSION}" \
+    org.opencontainers.image.licenses="BSD-3-Clause"
+
+RUN set -eux; \
+    dnf install -y \
+    bzip2 \
+    bzip2-devel \
+    gcc-c++ \
+    make \
+    python3-devel \
+    tar \
+    wget \
+    zlib-devel; \
+    dnf clean all
+
+WORKDIR /build
+
+RUN set -eux; \
+    BOOST_VERSION_UNDERSCORE="$(echo "${BOOST_VERSION}" | tr . _)"; \
+    wget "https://archives.boost.org/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORE}.tar.gz"; \
+    tar -xzf "boost_${BOOST_VERSION_UNDERSCORE}.tar.gz"; \
+    mv "boost_${BOOST_VERSION_UNDERSCORE}" boost
+
+WORKDIR /build/boost
+
+RUN set -eux; \
+    ./bootstrap.sh --prefix=/opt/boost; \
+    ./b2 install \
+      --with-iostreams \
+      --with-atomic \
+      --with-chrono \
+      --with-date_time \
+      --with-program_options \
+      --with-regex \
+      --with-serialization \
+      --with-system \
+      --with-thread \
+      cxxflags=-fPIC \
+      link=static \
+      runtime-link=shared \
+      threading=multi \
+      variant=release \
+      -j"$(nproc)"
+
+FROM rockylinux:${ROCKY_VERSION} AS builder
+ARG POSTGRES_MAJOR_VERSION
+ARG RDKIT_GIT_REF
+ARG RDKIT_VERSION
+
+COPY --from=boost-builder /opt/boost /opt/boost
+
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    case "${ARCH}" in \
+    x86_64) PGDG_ARCH='x86_64' ;; \
+    aarch64|arm64) PGDG_ARCH='aarch64' ;; \
+    *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+    esac; \
+    dnf install -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-${PGDG_ARCH}/pgdg-redhat-repo-latest.noarch.rpm"; \
+    dnf -qy module disable postgresql; \
+    dnf install -y dnf-plugins-core; \
+    dnf config-manager --set-enabled crb; \
+    dnf install -y \
+    binutils \
+    ca-certificates \
+    cmake \
+    diffutils \
+    eigen3-devel \
+    freetype-devel \
+    gcc-c++ \
+    git \
+    make \
+    postgresql${POSTGRES_MAJOR_VERSION}-devel \
+    tar \
+    xz-devel \
+    zlib-devel; \
+    dnf clean all
+
+WORKDIR /build
+
+RUN set -eux; \
+    git clone --branch "${RDKIT_GIT_REF}" --depth 1 https://github.com/rdkit/rdkit.git source; \
+    git -C source rev-parse HEAD
+
+WORKDIR /build/source
+
+RUN set -eux; \
+    PG_CONFIG="/usr/pgsql-${POSTGRES_MAJOR_VERSION}/bin/pg_config"; \
+    cmake -S . -B build \
+      -Wno-dev \
+      -D RDK_BUILD_AVALON_SUPPORT=ON \
+      -D RDK_BUILD_CAIRO_SUPPORT=OFF \
+      -D RDK_BUILD_COORDGEN_SUPPORT=ON \
+      -D RDK_BUILD_DESCRIPTORS3D=ON \
+      -D RDK_BUILD_FREESASA_SUPPORT=OFF \
+      -D RDK_BUILD_INCHI_SUPPORT=ON \
+      -D RDK_BUILD_MOLINTERCHANGE_SUPPORT=OFF \
+      -D RDK_BUILD_PGSQL=ON \
+      -D RDK_BUILD_PYTHON_WRAPPERS=OFF \
+      -D RDK_BUILD_STRUCTCHECKER_SUPPORT=OFF \
+      -D RDK_BUILD_YAEHMOP_SUPPORT=OFF \
+      -D RDK_INSTALL_INTREE=OFF \
+      -D RDK_INSTALL_STATIC_LIBS=ON \
+      -D RDK_PGSQL_STATIC=ON \
+      -D RDK_USE_URF=OFF \
+      -D BOOST_ROOT=/opt/boost \
+      -D Boost_ROOT=/opt/boost \
+      -D Boost_INCLUDE_DIR=/opt/boost/include \
+      -D Boost_LIBRARY_DIR_RELEASE=/opt/boost/lib \
+      -D Boost_NO_BOOST_CMAKE=ON \
+      -D Boost_NO_SYSTEM_PATHS=ON \
+      -D Boost_USE_MULTITHREADED=ON \
+      -D Boost_USE_STATIC_LIBS=ON \
+      -D PostgreSQL_CONFIG="${PG_CONFIG}" \
+      -D PostgreSQL_INCLUDE_DIR="$("${PG_CONFIG}" --includedir)" \
+      -D PostgreSQL_LIBRARY="$("${PG_CONFIG}" --libdir)/libpq.so" \
+      -D PostgreSQL_LIBRARY_DIR="$("${PG_CONFIG}" --libdir)" \
+      -D PostgreSQL_TYPE_INCLUDE_DIR="$("${PG_CONFIG}" --includedir-server)" \
+      -D CMAKE_BUILD_TYPE=Release \
+      -D CMAKE_INSTALL_PREFIX=/usr; \
+    cmake --build build --config Release --target rdkit -- -j"$(nproc)"; \
+    DESTDIR=/stage cmake --install build --component pgsql
+
+RUN set -eux; \
+    RDKIT_SO="/stage/usr/pgsql-${POSTGRES_MAJOR_VERSION}/lib/rdkit.so"; \
+    test -f "${RDKIT_SO}"; \
+    readelf -d "${RDKIT_SO}"; \
+    ldd "${RDKIT_SO}"; \
+    ! ldd "${RDKIT_SO}" | grep -E 'libboost_'; \
+    ! ldd "${RDKIT_SO}" | grep -E 'libRDKit'; \
+    test -f "/stage/usr/pgsql-${POSTGRES_MAJOR_VERSION}/share/extension/rdkit.control"; \
+    test -n "$(find "/stage/usr/pgsql-${POSTGRES_MAJOR_VERSION}/share/extension" -maxdepth 1 -type f -name 'rdkit--*.sql' -print -quit)"
+
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    case "${ARCH}" in \
+    x86_64) DIST_ARCH='x86_64' ;; \
+    aarch64|arm64) DIST_ARCH='aarch64' ;; \
+    *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+    esac; \
+    DIST_DIR="/dist/rdkit-postgres${POSTGRES_MAJOR_VERSION}-linux-${DIST_ARCH}-rdkit${RDKIT_VERSION}"; \
+    mkdir -p "${DIST_DIR}/lib" "${DIST_DIR}/share/extension"; \
+    cp -p "/stage/usr/pgsql-${POSTGRES_MAJOR_VERSION}/lib/rdkit.so" "${DIST_DIR}/lib/"; \
+    cp -p "/stage/usr/pgsql-${POSTGRES_MAJOR_VERSION}/share/extension/"*rdkit* "${DIST_DIR}/share/extension/"; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      '' \
+      'yes=0' \
+      'libdir=""' \
+      'sharedir=""' \
+      '' \
+      'while [ "$#" -gt 0 ]; do' \
+      '    case "$1" in' \
+      '        -y)' \
+      '            yes=1' \
+      '            shift' \
+      '            ;;' \
+      '        -libdir)' \
+      '            libdir="$2"' \
+      '            shift 2' \
+      '            ;;' \
+      '        -sharedir)' \
+      '            sharedir="$2"' \
+      '            shift 2' \
+      '            ;;' \
+      '        *)' \
+      '            echo "unknown option: $1" >&2' \
+      '            exit 2' \
+      '            ;;' \
+      '    esac' \
+      'done' \
+      '' \
+      'if [ -z "$libdir" ] || [ -z "$sharedir" ]; then' \
+      '    echo "usage: $0 -libdir DIR -sharedir DIR -y" >&2' \
+      '    exit 2' \
+      'fi' \
+      '' \
+      'if [ "$yes" -ne 1 ]; then' \
+      '    echo "refusing to install without -y" >&2' \
+      '    exit 1' \
+      'fi' \
+      '' \
+      'mkdir -p "$libdir" "$sharedir"' \
+      'cp -p ./lib/rdkit.so "$libdir/rdkit.so"' \
+      'cp -p ./share/extension/* "$sharedir/"' \
+      > "${DIST_DIR}/rdkit-pg-install.sh"; \
+    chmod +x "${DIST_DIR}/rdkit-pg-install.sh"; \
+    mkdir -p /out; \
+    tar -C /dist -czf "/out/$(basename "${DIST_DIR}").tgz" "$(basename "${DIST_DIR}")"; \
+    ln -s "$(basename "${DIST_DIR}").tgz" /out/rdkit-postgres.tgz
+
+FROM alpine:3.22 AS artifact
+ARG POSTGRES_MAJOR_VERSION
+ARG RDKIT_VERSION
+
+LABEL org.opencontainers.image.title="RDKit PostgreSQL distribution archive" \
+    org.opencontainers.image.description="Contains a source-built RDKit PostgreSQL cartridge distribution archive for later reuse" \
+    org.opencontainers.image.vendor="Cheminfo" \
+    org.opencontainers.image.version="${RDKIT_VERSION}" \
+    org.opencontainers.image.licenses="BSD-3-Clause" \
+    io.cheminfo.rdkit.postgres-major="${POSTGRES_MAJOR_VERSION}"
+
+RUN apk add --no-cache tar
+
+COPY --from=builder /out/ /out/
+
+CMD ["/bin/sh", "-lc", "ls -lh /out && tar -tzf /out/rdkit-postgres.tgz | sed -n '1,20p'"]

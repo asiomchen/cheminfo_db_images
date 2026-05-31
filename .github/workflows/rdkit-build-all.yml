@@ -20,6 +20,7 @@ permissions:
 env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: cheminfo-db
+  DIST_IMAGE_NAME: rdkit-postgres-dist
   ROCKY_VERSION: "9"
   PG_MAJORS: "16 17 18"
 
@@ -35,23 +36,22 @@ jobs:
       - name: Detect versions and check Docker Hub
         id: detect
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
           MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
         run: |
           python3 << 'EOF'
-          import json, os, re, urllib.request
+          import json, os, re, urllib.error, urllib.request
 
           DOCKER_USER = os.environ["DOCKER_USER"]
           IMAGE_NAME  = os.environ["IMAGE_NAME"]
+          DIST_IMAGE_NAME = os.environ["DIST_IMAGE_NAME"]
           ROCKY_VERSION = os.environ["ROCKY_VERSION"]
           PG_MAJORS   = os.environ["PG_MAJORS"].split()
-          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
           MIN_VERSION = os.environ.get("MIN_RDKIT_VERSION_INPUT") or "2024.03.6"
           MAX_VERSION = os.environ.get("MAX_RDKIT_VERSION_INPUT") or None
 
-          def fetch_json(url, headers=None):
-              req = urllib.request.Request(url, headers=headers or {})
+          def fetch_json(url):
+              req = urllib.request.Request(url)
               with urllib.request.urlopen(req) as resp:
                   return json.loads(resp.read())
 
@@ -66,26 +66,23 @@ jobs:
           def version_tuple(v):
               return tuple(int(x) for x in v.split("."))
 
-          def get_rdkit_releases(min_version, max_version=None):
-              min_v = version_tuple(min_version)
-              max_v = version_tuple(max_version) if max_version else None
-              pattern = re.compile(r'^Release_\d{4}_\d{2}_\d+$')
-              headers = {
-                  "Authorization": f"token {GITHUB_TOKEN}",
-                  "Accept": "application/vnd.github.v3+json",
-              }
-              releases = []
-              for page in (1, 2):
-                  url = f"https://api.github.com/repos/rdkit/rdkit/releases?per_page=100&page={page}"
-                  for r in fetch_json(url, headers):
-                      tag = r["tag_name"]
-                      if not pattern.match(tag):
+          def get_dist_versions_by_pg_major():
+              versions = {}
+              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{DIST_IMAGE_NAME}/tags/?page_size=100"
+              pattern = re.compile(r"^(\d+\.\d+\.\d+)-postgres(\d+)$")
+              while url:
+                  data = fetch_json(url)
+                  for tag_info in data.get("results", []):
+                      match = pattern.match(tag_info["name"])
+                      if not match:
                           continue
-                      clean = tag.replace("Release_", "").replace("_", ".")
-                      clean_v = version_tuple(clean)
-                      if clean_v >= min_v and (max_v is None or clean_v <= max_v):
-                          releases.append({"ref": tag, "clean": clean})
-              return sorted(releases, key=lambda r: version_tuple(r["clean"]))
+                      rdkit_version, pg_major = match.groups()
+                      versions.setdefault(pg_major, set()).add(rdkit_version)
+                  url = data.get("next")
+              return {
+                  pg_major: sorted(pg_versions, key=version_tuple)
+                  for pg_major, pg_versions in versions.items()
+              }
 
           def tag_exists(tag):
               url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
@@ -105,18 +102,25 @@ jobs:
                       continue
                   pg_minors[major] = minor
 
-              rdkit_releases = get_rdkit_releases(MIN_VERSION, MAX_VERSION)
+              min_v = version_tuple(MIN_VERSION)
+              max_v = version_tuple(MAX_VERSION) if MAX_VERSION else None
+              dist_versions = get_dist_versions_by_pg_major()
               if MAX_VERSION:
-                  print(f"RDKit releases from {MIN_VERSION} to {MAX_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+                  print(f"Using rdkit-postgres-dist tags for RDKit versions from {MIN_VERSION} to {MAX_VERSION}", flush=True)
               else:
-                  print(f"RDKit releases >= {MIN_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+                  print(f"Using rdkit-postgres-dist tags for RDKit versions >= {MIN_VERSION}", flush=True)
 
               matrix_entries = []
               merge_entries  = []
 
               for major, minor in pg_minors.items():
-                  for rdkit in rdkit_releases:
-                      tag = f"rocky{ROCKY_VERSION}-postgres{minor}-rdkit{rdkit['clean']}"
+                  versions = [
+                      v for v in dist_versions.get(major, [])
+                      if version_tuple(v) >= min_v and (max_v is None or version_tuple(v) <= max_v)
+                  ]
+                  print(f"PG{major} rdkit-postgres-dist versions in range: {versions}", flush=True)
+                  for rdkit_clean in versions:
+                      tag = f"rocky{ROCKY_VERSION}-postgres{minor}-rdkit{rdkit_clean}"
                       print(f"Checking: {tag}", flush=True)
                       if tag_exists(tag):
                           print(f"  -> exists, skipping", flush=True)
@@ -129,8 +133,9 @@ jobs:
                           matrix_entries.append({
                               "pg_minor":   minor,
                               "pg_major":   major,
-                              "rdkit_ref":  rdkit["ref"],
-                              "rdkit_clean": rdkit["clean"],
+                              "rdkit_ref":  f"Release_{rdkit_clean.replace('.', '_')}",
+                              "rdkit_clean": rdkit_clean,
+                              "rdkit_dist_image": f"{DOCKER_USER}/{DIST_IMAGE_NAME}:{rdkit_clean}-postgres{major}",
                               "arch":       arch,
                               "runner":     runner,
                               "platform":   platform,
@@ -138,8 +143,8 @@ jobs:
                       merge_entries.append({
                           "pg_minor":   minor,
                           "pg_major":   major,
-                          "rdkit_ref":  rdkit["ref"],
-                          "rdkit_clean": rdkit["clean"],
+                          "rdkit_ref":  f"Release_{rdkit_clean.replace('.', '_')}",
+                          "rdkit_clean": rdkit_clean,
                       })
 
               has_builds   = len(matrix_entries) > 0

@@ -21,7 +21,6 @@ env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
-  BOOST_VERSION: "1.84.0"
   MANIFEST_PUSH_DELAY_SECONDS: "10"
 
 jobs:
@@ -52,10 +51,10 @@ jobs:
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
-            --build-arg BOOST_VERSION="${BOOST_VERSION}" \
             --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
             --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
             --build-arg RDKIT_GIT_REF="${{ matrix.rdkit_ref }}" \
+            --build-arg RDKIT_DIST_IMAGE="${{ matrix.rdkit_dist_image }}" \
             -t "${LOCAL_TAG}" \
             --load \
             -f rdkit/Dockerfile rdkit/
@@ -87,6 +86,8 @@ jobs:
 
           docker exec "${CONTAINER}" psql -U postgres -c "SELECT rdkit_version();"
           docker exec "${CONTAINER}" psql -U postgres -c "SELECT mol_logp(mol_from_smiles('CCO'));"
+          docker exec "${CONTAINER}" sh -c "ldd /usr/pgsql-${{ matrix.pg_major }}/lib/rdkit.so | tee /tmp/rdkit-ldd.txt"
+          docker exec "${CONTAINER}" sh -c "! grep -E 'libboost_|libRDKit' /tmp/rdkit-ldd.txt"
 
           docker stop "${CONTAINER}"
           docker rm "${CONTAINER}"
@@ -99,10 +100,10 @@ jobs:
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
-            --build-arg BOOST_VERSION="${BOOST_VERSION}" \
             --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
             --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
             --build-arg RDKIT_GIT_REF="${{ matrix.rdkit_ref }}" \
+            --build-arg RDKIT_DIST_IMAGE="${{ matrix.rdkit_dist_image }}" \
             --output "type=image,name=${REPO},push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file /tmp/metadata.json \
             -f rdkit/Dockerfile rdkit/

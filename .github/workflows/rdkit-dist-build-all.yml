@@ -1,0 +1,146 @@
+name: Build RDKit Dist Images (All Versions)
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_rdkit_version:
+        description: 'Minimum RDKit version to build (e.g. 2024.03.6)'
+        required: false
+        default: '2024.03.6'
+      max_rdkit_version:
+        description: 'Maximum RDKit version to build (e.g. 2025.09.1)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 12 * * *'
+
+env:
+  DOCKER_USER: antonsiomchen
+  IMAGE_NAME: rdkit-postgres-dist
+  PG_MAJORS: "16 17 18"
+
+jobs:
+  detect-versions:
+    name: Detect RDKit dist versions and find missing builds
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
+      has_builds: ${{ steps.detect.outputs.has_builds }}
+    steps:
+      - name: Detect versions and check Docker Hub
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
+          MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
+        run: |
+          python3 << 'EOF'
+          import json, os, re, urllib.error, urllib.request
+
+          DOCKER_USER = os.environ["DOCKER_USER"]
+          IMAGE_NAME = os.environ["IMAGE_NAME"]
+          PG_MAJORS = os.environ["PG_MAJORS"].split()
+          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+          MIN_VERSION = os.environ.get("MIN_RDKIT_VERSION_INPUT") or "2024.03.6"
+          MAX_VERSION = os.environ.get("MAX_RDKIT_VERSION_INPUT") or None
+
+          def fetch_json(url, headers=None):
+              req = urllib.request.Request(url, headers=headers or {})
+              with urllib.request.urlopen(req) as resp:
+                  return json.loads(resp.read())
+
+          def version_tuple(v):
+              return tuple(int(x) for x in v.split("."))
+
+          def get_rdkit_releases(min_version, max_version=None):
+              min_v = version_tuple(min_version)
+              max_v = version_tuple(max_version) if max_version else None
+              pattern = re.compile(r'^Release_\d{4}_\d{2}_\d+$')
+              headers = {
+                  "Authorization": f"token {GITHUB_TOKEN}",
+                  "Accept": "application/vnd.github.v3+json",
+              }
+              releases = []
+              for page in range(1, 5):
+                  url = f"https://api.github.com/repos/rdkit/rdkit/releases?per_page=100&page={page}"
+                  page_releases = fetch_json(url, headers)
+                  if not page_releases:
+                      break
+                  for release in page_releases:
+                      tag = release["tag_name"]
+                      if not pattern.match(tag):
+                          continue
+                      clean = tag.replace("Release_", "").replace("_", ".")
+                      clean_v = version_tuple(clean)
+                      if clean_v >= min_v and (max_v is None or clean_v <= max_v):
+                          releases.append({"ref": tag, "clean": clean})
+              return sorted(releases, key=lambda r: version_tuple(r["clean"]))
+
+          def tag_exists(tag):
+              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
+              req = urllib.request.Request(url, method="HEAD")
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      return resp.status == 200
+              except urllib.error.HTTPError as e:
+                  return e.code != 404
+
+          def main():
+              rdkit_releases = get_rdkit_releases(MIN_VERSION, MAX_VERSION)
+              if MAX_VERSION:
+                  print(f"RDKit releases from {MIN_VERSION} to {MAX_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+              else:
+                  print(f"RDKit releases >= {MIN_VERSION}: {[r['clean'] for r in rdkit_releases]}", flush=True)
+
+              matrix_entries = []
+              merge_entries = []
+
+              for pg_major in PG_MAJORS:
+                  for rdkit in rdkit_releases:
+                      tag = f"{rdkit['clean']}-postgres{pg_major}"
+                      print(f"Checking: {tag}", flush=True)
+                      if tag_exists(tag):
+                          print("  -> exists, skipping", flush=True)
+                          continue
+                      print("  -> missing, will build", flush=True)
+                      for arch, runner, platform in [
+                          ("amd64", "ubuntu-24.04", "linux/amd64"),
+                          ("arm64", "ubuntu-24.04-arm", "linux/arm64"),
+                      ]:
+                          matrix_entries.append({
+                              "pg_major": pg_major,
+                              "rdkit_ref": rdkit["ref"],
+                              "rdkit_clean": rdkit["clean"],
+                              "arch": arch,
+                              "runner": runner,
+                              "platform": platform,
+                          })
+                      merge_entries.append({
+                          "pg_major": pg_major,
+                          "rdkit_clean": rdkit["clean"],
+                      })
+
+              has_builds = len(matrix_entries) > 0
+              matrix = json.dumps({"include": matrix_entries})
+              merge_matrix = json.dumps({"include": merge_entries})
+              print(f"has_builds={has_builds}, {len(merge_entries)} combos to build", flush=True)
+
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"matrix={matrix}\n")
+                  f.write(f"merge_matrix={merge_matrix}\n")
+                  f.write(f"has_builds={'true' if has_builds else 'false'}\n")
+
+          main()
+          EOF
+
+  build-and-push:
+    needs: detect-versions
+    if: needs.detect-versions.outputs.has_builds == 'true'
+    uses: ./.github/workflows/rdkit-dist-reusable.yml
+    with:
+      matrix: ${{ needs.detect-versions.outputs.matrix }}
+      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

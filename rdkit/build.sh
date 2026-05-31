@@ -5,6 +5,7 @@ set -euo pipefail
 # Configuration
 DOCKER_USER="antonsiomchen"
 IMAGE_NAME="cheminfo-db"
+DIST_IMAGE_NAME="rdkit-postgres-dist"
 
 # Version matrices
 ROCKY_VERSIONS=("9")
@@ -32,6 +33,54 @@ except Exception:
 " "$major_ver"
 }
 
+dist_image_ref() {
+    local postgres_major_version=$1
+    local rdkit_version=$2
+
+    local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
+    echo "${DOCKER_USER}/${DIST_IMAGE_NAME}:${clean_rdkit_version}-postgres${postgres_major_version}"
+}
+
+build_dist_local_cmd() {
+    local rocky_version=$1
+    local postgres_major_version=$2
+    local rdkit_version=$3
+
+    local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
+    local dist_ref
+    dist_ref=$(dist_image_ref "$postgres_major_version" "$rdkit_version")
+    echo "echo Building RDKit dist amd64 for local test: ${dist_ref}"
+    echo "docker buildx build --platform linux/amd64 \\"
+    echo "    --build-arg ROCKY_VERSION=${rocky_version} \\"
+    echo "    --build-arg POSTGRES_MAJOR_VERSION=${postgres_major_version} \\"
+    echo "    --build-arg RDKIT_GIT_REF=Release_${rdkit_version} \\"
+    echo "    --build-arg RDKIT_VERSION=${clean_rdkit_version} \\"
+    echo "    -t ${dist_ref} \\"
+    echo "    --load \\"
+    echo "    -f Dockerfile.dist . 2>&1 | tee build-rdkit-dist-postgres${postgres_major_version}-rdkit${clean_rdkit_version}.log"
+    echo ""
+}
+
+push_dist_multiarch_cmd() {
+    local rocky_version=$1
+    local postgres_major_version=$2
+    local rdkit_version=$3
+
+    local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
+    local dist_ref
+    dist_ref=$(dist_image_ref "$postgres_major_version" "$rdkit_version")
+    echo "echo Pushing RDKit dist multi-arch: ${dist_ref}"
+    echo "docker buildx build --platform linux/amd64,linux/arm64 \\"
+    echo "    --build-arg ROCKY_VERSION=${rocky_version} \\"
+    echo "    --build-arg POSTGRES_MAJOR_VERSION=${postgres_major_version} \\"
+    echo "    --build-arg RDKIT_GIT_REF=Release_${rdkit_version} \\"
+    echo "    --build-arg RDKIT_VERSION=${clean_rdkit_version} \\"
+    echo "    -t ${dist_ref} \\"
+    echo "    --push \\"
+    echo "    -f Dockerfile.dist . 2>&1 | tee build-rdkit-dist-postgres${postgres_major_version}-rdkit${clean_rdkit_version}.log"
+    echo ""
+}
+
 # Build amd64 locally so the image is available for testing before the multiarch push.
 build_local_cmd() {
     local rocky_version=$1
@@ -41,12 +90,15 @@ build_local_cmd() {
     local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
     local postgres_major_version=$(echo ${postgres_minor_version} | cut -d. -f1)
     local build_tag="rocky${rocky_version}-postgres${postgres_minor_version}-rdkit${clean_rdkit_version}"
+    local dist_ref
+    dist_ref=$(dist_image_ref "$postgres_major_version" "$rdkit_version")
     echo "echo Building amd64 for local test: ${build_tag}"
     echo "docker buildx build --platform linux/amd64 \\"
     echo "    --build-arg ROCKY_VERSION=${rocky_version} \\"
     echo "    --build-arg POSTGRES_VERSION=${postgres_minor_version} \\"
     echo "    --build-arg POSTGRES_MAJOR_VERSION=${postgres_major_version} \\"
     echo "    --build-arg RDKIT_GIT_REF=Release_${rdkit_version} \\"
+    echo "    --build-arg RDKIT_DIST_IMAGE=${dist_ref} \\"
     echo "    -t ${DOCKER_USER}/${IMAGE_NAME}:${build_tag} \\"
     echo "    --load \\"
     echo "    -f Dockerfile . 2>&1 | tee build-${build_tag}.log"
@@ -74,6 +126,8 @@ push_multiarch_cmd() {
     local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
     local postgres_major_version=$(echo ${postgres_minor_version} | cut -d. -f1)
     local build_tag="rocky${rocky_version}-postgres${postgres_minor_version}-rdkit${clean_rdkit_version}"
+    local dist_ref
+    dist_ref=$(dist_image_ref "$postgres_major_version" "$rdkit_version")
 
     local tag_args="-t ${DOCKER_USER}/${IMAGE_NAME}:${build_tag}"
     tag_args+=" \\"$'\n'"    -t ${DOCKER_USER}/${IMAGE_NAME}:rocky${rocky_version}-postgres${postgres_major_version}-rdkit${clean_rdkit_version}"
@@ -88,6 +142,7 @@ push_multiarch_cmd() {
     echo "    --build-arg POSTGRES_VERSION=${postgres_minor_version} \\"
     echo "    --build-arg POSTGRES_MAJOR_VERSION=${postgres_major_version} \\"
     echo "    --build-arg RDKIT_GIT_REF=Release_${rdkit_version} \\"
+    echo "    --build-arg RDKIT_DIST_IMAGE=${dist_ref} \\"
     echo "    ${tag_args} \\"
     echo "    --push \\"
     echo "    -f Dockerfile . 2>&1 | tee build-${build_tag}.log"
@@ -109,10 +164,13 @@ for rocky_version in "${ROCKY_VERSIONS[@]}"; do
         for rdkit_version in "${RDKIT_VERSIONS[@]}"; do
             LATEST_MINOR=$(get_latest_pg_minor $postgres_version)
             clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
+            postgres_major_version=$(echo ${LATEST_MINOR} | cut -d. -f1)
             build_tag="rocky${rocky_version}-postgres${LATEST_MINOR}-rdkit${clean_rdkit_version}"
 
+            build_dist_local_cmd "$rocky_version" "$postgres_major_version" "$rdkit_version"
             build_local_cmd "$rocky_version" "$LATEST_MINOR" "$rdkit_version"
             test_image "$build_tag"
+            push_dist_multiarch_cmd "$rocky_version" "$postgres_major_version" "$rdkit_version"
             push_multiarch_cmd "$rocky_version" "$LATEST_MINOR" "$rdkit_version"
         done
     done
