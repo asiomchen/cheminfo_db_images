@@ -9,6 +9,7 @@ permissions:
 env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: cheminfo-db
+  DIST_IMAGE_NAME: bingo-dist
   ROCKY_VERSION: "9"
   PG_MAJORS: "15 16 17"
 
@@ -28,10 +29,9 @@ jobs:
 
           DOCKER_USER = os.environ["DOCKER_USER"]
           IMAGE_NAME  = os.environ["IMAGE_NAME"]
+          DIST_IMAGE_NAME = os.environ["DIST_IMAGE_NAME"]
           ROCKY_VERSION = os.environ["ROCKY_VERSION"]
           PG_MAJORS   = os.environ["PG_MAJORS"].split()
-
-          EPAM_BASE = "https://lifescience.opensource.epam.com"
 
           def fetch_json(url):
               with urllib.request.urlopen(url) as resp:
@@ -45,23 +45,26 @@ jobs:
               tags.sort(key=lambda s: [int(u) for u in s.split(".")])
               return tags[-1] if tags else None
 
-          def get_latest_bingo_version():
-              url = f"{EPAM_BASE}/download/bingo.html"
-              with urllib.request.urlopen(url) as resp:
-                  html = resp.read().decode()
-              versions = re.findall(r'href="bingo/bingo-(\d+\.\d+\.\d+)\.html"', html)
-              versions = list(set(versions))
-              versions.sort(key=lambda v: tuple(int(x) for x in v.split(".")))
-              return versions[-1] if versions else None
+          def version_tuple(v):
+              return tuple(int(x) for x in v.split("."))
 
-          def binary_exists(bingo_ver, pg_major):
-              url = f"{EPAM_BASE}/downloads/bingo-{bingo_ver}/bingo-postgres-{pg_major}-linux-x86_64.zip"
-              req = urllib.request.Request(url, method="HEAD")
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      return resp.status == 200
-              except (urllib.error.HTTPError, urllib.error.URLError):
-                  return False
+          def get_dist_versions_by_pg_major():
+              versions = {}
+              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{DIST_IMAGE_NAME}/tags/?page_size=100"
+              pattern = re.compile(r"^(\d+\.\d+\.\d+)-postgres(\d+)$")
+              while url:
+                  data = fetch_json(url)
+                  for tag_info in data.get("results", []):
+                      match = pattern.match(tag_info["name"])
+                      if not match:
+                          continue
+                      bingo_version, pg_major = match.groups()
+                      versions.setdefault(pg_major, set()).add(bingo_version)
+                  url = data.get("next")
+              return {
+                  pg_major: sorted(pg_versions, key=version_tuple)
+                  for pg_major, pg_versions in versions.items()
+              }
 
           def tag_exists(tag):
               url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
@@ -73,14 +76,22 @@ jobs:
                   return e.code != 404
 
           def main():
-              latest_bingo = get_latest_bingo_version()
+              dist_versions = get_dist_versions_by_pg_major()
+              latest_bingo = None
+              for pg_major in PG_MAJORS:
+                  versions = dist_versions.get(pg_major, [])
+                  if versions:
+                      candidate = versions[-1]
+                      if latest_bingo is None or version_tuple(candidate) > version_tuple(latest_bingo):
+                          latest_bingo = candidate
+
               if not latest_bingo:
-                  print("ERROR: Could not detect any Bingo version from EPAM page", flush=True)
+                  print("ERROR: Could not detect any Bingo version from bingo-dist tags", flush=True)
                   with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                       f.write("matrix={\"include\":[]}\n")
                       f.write("has_builds=false\n")
                   return
-              print(f"Latest Bingo version detected: {latest_bingo}", flush=True)
+              print(f"Latest Bingo version detected from bingo-dist tags: {latest_bingo}", flush=True)
 
               matrix_entries = []
 
@@ -90,8 +101,8 @@ jobs:
                   if not minor:
                       continue
 
-                  if not binary_exists(latest_bingo, major):
-                      print(f"  -> No binary for Bingo {latest_bingo} + PG{major}, skipping", flush=True)
+                  if latest_bingo not in dist_versions.get(major, []):
+                      print(f"  -> No bingo-dist tag for Bingo {latest_bingo} + PG{major}, skipping", flush=True)
                       continue
 
                   tag = f"rocky{ROCKY_VERSION}-postgres{minor}-bingo{latest_bingo}"
@@ -104,6 +115,7 @@ jobs:
                       "pg_minor":      minor,
                       "pg_major":      major,
                       "bingo_version": latest_bingo,
+                      "bingo_dist_image": f"{DOCKER_USER}/{DIST_IMAGE_NAME}:{latest_bingo}-postgres{major}",
                   })
 
               has_builds = len(matrix_entries) > 0

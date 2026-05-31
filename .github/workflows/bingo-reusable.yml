@@ -49,6 +49,7 @@ jobs:
             --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
             --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
             --build-arg BINGO_VERSION="${{ matrix.bingo_version }}" \
+            --build-arg BINGO_DIST_IMAGE="${{ matrix.bingo_dist_image }}" \
             -t "${LOCAL_TAG}" \
             --load \
             -f bingo/Dockerfile bingo/
@@ -96,6 +97,7 @@ jobs:
             --build-arg POSTGRES_VERSION="${MINOR}" \
             --build-arg POSTGRES_MAJOR_VERSION="${MAJOR}" \
             --build-arg BINGO_VERSION="${BINGO}" \
+            --build-arg BINGO_DIST_IMAGE="${{ matrix.bingo_dist_image }}" \
             -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MINOR}-bingo${BINGO}" \
             -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MAJOR}-bingo${BINGO}" \
             -t "${REPO}:postgres${MAJOR}-bingo${BINGO}" \
