@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      max-parallel: 10
       matrix: ${{ fromJson(inputs.matrix) }}
     steps:
       - name: Checkout
