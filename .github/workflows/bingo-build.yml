@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.detect.outputs.matrix }}
+      merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
       has_builds: ${{ steps.detect.outputs.has_builds }}
     steps:
       - name: Detect versions and check Docker Hub
@@ -89,11 +90,13 @@ jobs:
                   print("ERROR: Could not detect any Bingo version from bingo-dist tags", flush=True)
                   with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                       f.write("matrix={\"include\":[]}\n")
+                      f.write("merge_matrix={\"include\":[]}\n")
                       f.write("has_builds=false\n")
                   return
               print(f"Latest Bingo version detected from bingo-dist tags: {latest_bingo}", flush=True)
 
               matrix_entries = []
+              merge_entries = []
 
               for major in PG_MAJORS:
                   minor = get_latest_pg_minor(major)
@@ -111,19 +114,33 @@ jobs:
                       print(f"  -> exists, skipping", flush=True)
                       continue
                   print(f"  -> missing, will build", flush=True)
-                  matrix_entries.append({
-                      "pg_minor":      minor,
-                      "pg_major":      major,
+                  for arch, runner, platform in [
+                      ("amd64", "ubuntu-24.04", "linux/amd64"),
+                      ("arm64", "ubuntu-24.04-arm", "linux/arm64"),
+                  ]:
+                      matrix_entries.append({
+                          "pg_minor": minor,
+                          "pg_major": major,
+                          "bingo_version": latest_bingo,
+                          "bingo_dist_image": f"{DOCKER_USER}/{DIST_IMAGE_NAME}:{latest_bingo}-postgres{major}",
+                          "arch": arch,
+                          "runner": runner,
+                          "platform": platform,
+                      })
+                  merge_entries.append({
+                      "pg_minor": minor,
+                      "pg_major": major,
                       "bingo_version": latest_bingo,
-                      "bingo_dist_image": f"{DOCKER_USER}/{DIST_IMAGE_NAME}:{latest_bingo}-postgres{major}",
                   })
 
               has_builds = len(matrix_entries) > 0
               matrix = json.dumps({"include": matrix_entries})
-              print(f"has_builds={has_builds}, {len(matrix_entries)} combos to build", flush=True)
+              merge_matrix = json.dumps({"include": merge_entries})
+              print(f"has_builds={has_builds}, {len(merge_entries)} combos to build", flush=True)
 
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write(f"matrix={matrix}\n")
+                  f.write(f"merge_matrix={merge_matrix}\n")
                   f.write(f"has_builds={'true' if has_builds else 'false'}\n")
 
           main()
@@ -135,6 +152,7 @@ jobs:
     uses: ./.github/workflows/bingo-reusable.yml
     with:
       matrix: ${{ needs.detect-versions.outputs.matrix }}
+      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -6,6 +6,9 @@ on:
       matrix:
         required: true
         type: string
+      merge_matrix:
+        required: true
+        type: string
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -18,11 +21,12 @@ env:
   DOCKER_USER: antonsiomchen
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
+  MANIFEST_PUSH_DELAY_SECONDS: "10"
 
 jobs:
   build:
-    name: Build postgres${{ matrix.pg_minor }}-bingo${{ matrix.bingo_version }}
-    runs-on: ubuntu-24.04
+    name: Build postgres${{ matrix.pg_minor }}-bingo${{ matrix.bingo_version }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -45,7 +49,7 @@ jobs:
         run: |
           LOCAL_TAG="bingo-test:${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
           docker buildx build \
-            --platform linux/amd64 \
+            --platform ${{ matrix.platform }} \
             --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
             --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
             --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
@@ -58,7 +62,7 @@ jobs:
       - name: Test image
         run: |
           LOCAL_TAG="bingo-test:${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
-          CONTAINER="test-bingo-${{ matrix.pg_minor }}-${{ matrix.bingo_version }}"
+          CONTAINER="test-bingo-${{ matrix.pg_minor }}-${{ matrix.bingo_version }}-${{ matrix.arch }}"
 
           docker run -d \
             --name "${CONTAINER}" \
@@ -85,30 +89,94 @@ jobs:
           docker stop "${CONTAINER}"
           docker rm "${CONTAINER}"
 
-      - name: Push image with all tags
+      - name: Push image by digest
         run: |
           REPO="${DOCKER_USER}/${IMAGE_NAME}"
+          mkdir -p /tmp/digests
+
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
+            --build-arg POSTGRES_VERSION="${{ matrix.pg_minor }}" \
+            --build-arg POSTGRES_MAJOR_VERSION="${{ matrix.pg_major }}" \
+            --build-arg BINGO_VERSION="${{ matrix.bingo_version }}" \
+            --build-arg BINGO_DIST_IMAGE="${{ matrix.bingo_dist_image }}" \
+            --output "type=image,name=${REPO},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file /tmp/metadata.json \
+            -f bingo/Dockerfile bingo/
+
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/metadata.json)
+          echo "Pushed digest: ${DIGEST}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: digest-${{ matrix.pg_minor }}-${{ matrix.bingo_version }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-manifest:
+    name: Merge manifests for postgres${{ matrix.pg_minor }}-bingo${{ matrix.bingo_version }}
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.merge_matrix) }}
+    steps:
+      - name: Download digest artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: digest-${{ matrix.pg_minor }}-${{ matrix.bingo_version }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifests
+        run: |
+          BASE="${DOCKER_USER}/${IMAGE_NAME}"
           MINOR="${{ matrix.pg_minor }}"
           MAJOR="${{ matrix.pg_major }}"
           BINGO="${{ matrix.bingo_version }}"
 
-          docker buildx build \
-            --platform linux/amd64 \
-            --build-arg ROCKY_VERSION="${ROCKY_VERSION}" \
-            --build-arg POSTGRES_VERSION="${MINOR}" \
-            --build-arg POSTGRES_MAJOR_VERSION="${MAJOR}" \
-            --build-arg BINGO_VERSION="${BINGO}" \
-            --build-arg BINGO_DIST_IMAGE="${{ matrix.bingo_dist_image }}" \
-            -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MINOR}-bingo${BINGO}" \
-            -t "${REPO}:rocky${ROCKY_VERSION}-postgres${MAJOR}-bingo${BINGO}" \
-            -t "${REPO}:postgres${MAJOR}-bingo${BINGO}" \
-            -t "${REPO}:postgres${MINOR}-bingo${BINGO}" \
-            --push \
-            -f bingo/Dockerfile bingo/
+          IMAGES=""
+          for digest_file in /tmp/digests/*; do
+            digest=$(basename "${digest_file}")
+            IMAGES="${IMAGES} ${BASE}@sha256:${digest}"
+          done
+
+          TAGS=(
+            "rocky${ROCKY_VERSION}-postgres${MINOR}-bingo${BINGO}"
+            "rocky${ROCKY_VERSION}-postgres${MAJOR}-bingo${BINGO}"
+            "postgres${MAJOR}-bingo${BINGO}"
+            "postgres${MINOR}-bingo${BINGO}"
+          )
+
+          for i in "${!TAGS[@]}"; do
+            tag="${TAGS[$i]}"
+            echo "Publishing manifest ${tag}"
+            docker buildx imagetools create \
+              -t "${BASE}:${tag}" \
+              ${IMAGES}
+
+            if [ "$i" -lt "$(( ${#TAGS[@]} - 1 ))" ]; then
+              echo "Sleeping ${MANIFEST_PUSH_DELAY_SECONDS}s to avoid Docker Hub rate limits"
+              sleep "${MANIFEST_PUSH_DELAY_SECONDS}"
+            fi
+          done
 
   update-docs:
     name: Update README and Docker Hub description
-    needs: build
+    needs: merge-manifest
     runs-on: ubuntu-24.04
     concurrency:
       group: cheminfo-docs-update
