@@ -2,8 +2,8 @@
 
 This repository builds RDKit PostgreSQL in two steps:
 
-1. `rdkit-dist`: a small artifact image containing a reusable RDKit PostgreSQL cartridge archive.
-2. `cheminfo-db`: the final PostgreSQL runtime image that installs the cartridge archive from `rdkit-dist`.
+1. `rdkit-postgres-dist`: a small artifact image containing a reusable RDKit PostgreSQL cartridge archive.
+2. `cheminfo-db`: the final PostgreSQL runtime image that installs the cartridge archive from `rdkit-postgres-dist`.
 
 The purpose of the distribution image is to make the RDKit PostgreSQL cartridge easy to share and reuse without requiring every final image build to compile Boost and RDKit from source.
 
@@ -26,13 +26,13 @@ The resulting `rdkit.so` is still a PostgreSQL shared object, but it does not re
 Distribution image:
 
 ```text
-antonsiomchen/rdkit-dist:<rdkit-version>-postgres<postgres-major>
+antonsiomchen/rdkit-postgres-dist:<rdkit-version>-postgres<postgres-major>
 ```
 
 Example:
 
 ```text
-antonsiomchen/rdkit-dist:2025.09.5-postgres17
+antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Final runtime image:
@@ -92,7 +92,7 @@ docker buildx build --platform linux/amd64 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
   --build-arg RDKIT_VERSION=2025.09.5 \
-  -t antonsiomchen/rdkit-dist:2025.09.5-postgres17 \
+  -t antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
   --load \
   -f Dockerfile.dist .
 ```
@@ -105,7 +105,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
   --build-arg RDKIT_VERSION=2025.09.5 \
-  -t antonsiomchen/rdkit-dist:2025.09.5-postgres17 \
+  -t antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
   --push \
   -f Dockerfile.dist .
 ```
@@ -115,13 +115,13 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 List the packaged files:
 
 ```bash
-docker run --rm antonsiomchen/rdkit-dist:2025.09.5-postgres17
+docker run --rm antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Extract the archive locally:
 
 ```bash
-container_id="$(docker create antonsiomchen/rdkit-dist:2025.09.5-postgres17)"
+container_id="$(docker create antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
 docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
 docker rm "${container_id}"
 tar -tzf ./rdkit-postgres.tgz
@@ -130,7 +130,7 @@ tar -tzf ./rdkit-postgres.tgz
 Verify that the cartridge does not depend on Boost or RDKit shared libraries:
 
 ```bash
-container_id="$(docker create antonsiomchen/rdkit-dist:2025.09.5-postgres17)"
+container_id="$(docker create antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
 docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
 docker rm "${container_id}"
 mkdir -p /tmp/rdkit-postgres-dist
@@ -147,7 +147,7 @@ During the build, `Dockerfile.dist` also runs the same dependency check and fail
 The final `rdkit/Dockerfile` consumes the dist image with this build argument:
 
 ```text
-RDKIT_DIST_IMAGE=antonsiomchen/rdkit-dist:2025.09.5-postgres17
+RDKIT_DIST_IMAGE=antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Build example:
@@ -158,7 +158,7 @@ docker buildx build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.10 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
-  --build-arg RDKIT_DIST_IMAGE=antonsiomchen/rdkit-dist:2025.09.5-postgres17 \
+  --build-arg RDKIT_DIST_IMAGE=antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
   -t antonsiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5 \
   --load \
   -f Dockerfile .
@@ -249,13 +249,29 @@ From the `rdkit` directory:
 
 For each Rocky/PostgreSQL/RDKit matrix item, the generated command order is:
 
-1. Build local `rdkit-dist` for `linux/amd64`.
+1. Build local `rdkit-postgres-dist` for `linux/amd64`.
 2. Build local final `cheminfo-db` image for `linux/amd64`.
 3. Test the final image.
-4. Push multi-architecture `rdkit-dist`.
+4. Push multi-architecture `rdkit-postgres-dist`.
 5. Push multi-architecture final `cheminfo-db`.
 
 The final image build receives the matching dist image through `RDKIT_DIST_IMAGE`.
+
+## GitHub Actions
+
+RDKit dist images are published by:
+
+- `.github/workflows/rdkit-dist-build.yml` for manual single-version dist builds.
+- `.github/workflows/rdkit-dist-build-all.yml` for scheduled/manual multi-version dist builds.
+- `.github/workflows/rdkit-dist-reusable.yml` for the shared multi-architecture build and manifest publish logic.
+
+Final RDKit database images are built by:
+
+- `.github/workflows/rdkit-build.yml` for the latest RDKit version available in `antonsiomchen/rdkit-postgres-dist`.
+- `.github/workflows/rdkit-build-all.yml` for all available dist versions in the selected version range.
+- `.github/workflows/rdkit-reusable.yml` for the shared final image build, SQL verification, and manifest publish logic.
+
+The final image workflows discover tags from `antonsiomchen/rdkit-postgres-dist` and skip combinations where the matching dist image has not been published yet.
 
 ## Runtime Dependencies
 
