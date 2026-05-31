@@ -61,11 +61,9 @@ jobs:
         run: |
           LOCAL_TAG="rdkit-dist-test:${{ matrix.rdkit_clean }}-postgres${{ matrix.pg_major }}-${{ matrix.arch }}"
           CONTAINER="test-rdkit-dist-${{ matrix.pg_major }}-${{ matrix.arch }}"
-          WORKDIR="$(mktemp -d)"
 
           cleanup() {
             docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
-            rm -rf "${WORKDIR}"
           }
           trap cleanup EXIT
 
@@ -77,11 +75,9 @@ jobs:
           docker exec "${CONTAINER}" grep -E '(^|/)share/extension/rdkit.control$' /tmp/archive-contents.txt
           docker exec "${CONTAINER}" grep -E '(^|/)share/extension/rdkit--.*\.sql$' /tmp/archive-contents.txt
 
-          docker cp "${CONTAINER}:/out/rdkit-postgres.tgz" "${WORKDIR}/rdkit-postgres.tgz"
-          tar -xzf "${WORKDIR}/rdkit-postgres.tgz" -C "${WORKDIR}"
-          ldd "${WORKDIR}"/rdkit-postgres*/lib/rdkit.so > "${WORKDIR}/ldd.txt"
-          cat "${WORKDIR}/ldd.txt"
-          ! grep -E 'libboost_|libRDKit' "${WORKDIR}/ldd.txt"
+          docker exec "${CONTAINER}" sh -lc "mkdir -p /tmp/rdkit-postgres-dist && tar -xzf /out/rdkit-postgres.tgz -C /tmp/rdkit-postgres-dist"
+          docker exec "${CONTAINER}" sh -lc "ldd /tmp/rdkit-postgres-dist/rdkit-postgres*/lib/rdkit.so | tee /tmp/rdkit-ldd.txt"
+          docker exec "${CONTAINER}" sh -lc "! grep -E 'libboost_|libRDKit' /tmp/rdkit-ldd.txt"
 
       - name: Push image by digest
         run: |
