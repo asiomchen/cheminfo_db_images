@@ -11,6 +11,8 @@ Yet another PostgreSQL images with pre-installed **RDKit** or **Bingo** extensio
 
 Supports **linux/amd64** and **linux/arm64** architectures.
 
+**Due to the Docker restrictive API limits, repo is in process of being migrated to GitHub. Please check back later for the new location.**
+
 ## Quick Start
 
 Run a PostgreSQL instance with the RDKit extension:

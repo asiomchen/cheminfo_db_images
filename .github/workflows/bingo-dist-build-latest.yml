@@ -8,8 +8,8 @@ on:
         required: false
         default: "15 16 17"
         type: string
-  schedule:
-    - cron: '0 5 * * *'
+#   schedule:
+#     - cron: '0 5 * * *'
 
 env:
   DOCKER_USER: antonsiomchen
