@@ -1,7 +1,7 @@
 ARG POSTGRES_VERSION=17.6
 ARG ROCKY_VERSION=9
 ARG BINGO_VERSION=1.34.0
-ARG BINGO_DIST_IMAGE=antonsiomchen/bingo-dist:1.34.0-postgres17
+ARG BINGO_DIST_IMAGE=ghcr.io/asiomchen/bingo-dist:1.34.0-postgres17
 
 FROM ${BINGO_DIST_IMAGE} AS loader
 ARG POSTGRES_VERSION
@@ -20,7 +20,8 @@ LABEL org.opencontainers.image.title="Bingo PostgreSQL" \
     org.opencontainers.image.description="PostgreSQL image with Bingo extension pre-installed" \
     org.opencontainers.image.vendor="Cheminfo" \
     org.opencontainers.image.version="${BINGO_VERSION}" \
-    org.opencontainers.image.licenses="Apache-2.0"
+    org.opencontainers.image.licenses="Apache-2.0" \
+    org.opencontainers.image.source="https://github.com/asiomchen/cheminfo_db_images"
 
 # Install PostgreSQL and dependencies
 RUN set -eux; \

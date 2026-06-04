@@ -30,8 +30,12 @@ on:
         type: string
 
 env:
-  DOCKER_USER: antonsiomchen
+  IMAGE_OWNER: asiomchen
   IMAGE_NAME: bingo-dist
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   prepare-matrix:
@@ -42,10 +46,13 @@ jobs:
       merge_matrix: ${{ steps.prepare.outputs.merge_matrix }}
       has_builds: ${{ steps.prepare.outputs.has_builds }}
     steps:
-      - name: Resolve versions and check Docker Hub
+      - uses: actions/checkout@v6.0.2
+
+      - name: Resolve versions and check GHCR
         id: prepare
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
           MODE: ${{ inputs.mode }}
           BINGO_VERSION_INPUT: ${{ inputs.bingo_version }}
           MIN_BINGO_VERSION_INPUT: ${{ inputs.min_bingo_version }}
@@ -55,7 +62,8 @@ jobs:
           python3 << 'EOF'
           import json, os, re, urllib.request
 
-          DOCKER_USER = os.environ["DOCKER_USER"]
+          from scripts.registry_helpers import ghcr_tag_exists
+
           IMAGE_NAME = os.environ["IMAGE_NAME"]
           GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
           MODE = os.environ["MODE"].strip()
@@ -158,13 +166,7 @@ jobs:
               return deduped
 
           def tag_exists(tag):
-              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
-              req = urllib.request.Request(url, method="HEAD")
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      return resp.status == 200
-              except urllib.error.HTTPError as e:
-                  return e.code != 404
+              return ghcr_tag_exists(IMAGE_NAME, tag)
 
           def build_targets():
               releases = get_numeric_indigo_releases()
@@ -281,6 +283,3 @@ jobs:
     with:
       matrix: ${{ needs.prepare-matrix.outputs.matrix }}
       merge_matrix: ${{ needs.prepare-matrix.outputs.merge_matrix }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

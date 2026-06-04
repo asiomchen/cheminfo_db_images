@@ -1,5 +1,5 @@
 ARG ROCKY_VERSION=9
-ARG RDKIT_DIST_IMAGE=antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
+ARG RDKIT_DIST_IMAGE=ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 
 FROM ${RDKIT_DIST_IMAGE} AS loader
 RUN mkdir -p /tmp && \
@@ -15,7 +15,8 @@ LABEL org.opencontainers.image.title="RDKit PostgreSQL" \
     org.opencontainers.image.description="PostgreSQL image with RDKit extension pre-installed" \
     org.opencontainers.image.vendor="Cheminfo" \
     org.opencontainers.image.version="${RDKIT_GIT_REF}" \
-    org.opencontainers.image.licenses="BSD-3-Clause"
+    org.opencontainers.image.licenses="BSD-3-Clause" \
+    org.opencontainers.image.source="https://github.com/asiomchen/cheminfo_db_images"
 
 # Install Runtime dependencies and PostgreSQL
 RUN set -eux; \

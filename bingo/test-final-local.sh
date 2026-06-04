@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOCKER_USER="antonsiomchen"
+REGISTRY="ghcr.io"
+IMAGE_OWNER="asiomchen"
 IMAGE_NAME="cheminfo-db"
 ROCKY_VERSION="9"
 POSTGRES_MAJOR_VERSION="15"
 POSTGRES_VERSION=""
 BINGO_VERSION="1.43.0"
-BINGO_DIST_IMAGE="antonsiomchen/bingo-dist:1.43.0-postgres15"
+BINGO_DIST_IMAGE="${REGISTRY}/${IMAGE_OWNER}/bingo-dist:1.43.0-postgres15"
 ARCHES=("amd64" "arm64")
 
 usage() {
@@ -27,21 +28,7 @@ EOF
 
 get_latest_pg_minor() {
     local major_ver=$1
-    local output
-    output=$(curl -fsSL "https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&name=${major_ver}.")
-
-    echo "$output" | python3 -c "
-import sys, json, re
-data = json.load(sys.stdin)
-major_ver = sys.argv[1]
-tags = [r['name'] for r in data['results']]
-regex = re.compile(r'^' + re.escape(major_ver) + r'\.\d+$')
-valid_tags = [t for t in tags if regex.match(t)]
-valid_tags.sort(key=lambda s: [int(u) for u in s.split('.')])
-if not valid_tags:
-    raise SystemExit(1)
-print(valid_tags[-1])
-" "$major_ver"
+    python3 ../scripts/registry_helpers.py latest-pg-minor "$major_ver"
 }
 
 cleanup_container() {
@@ -186,7 +173,7 @@ echo "  docker run --privileged --rm tonistiigi/binfmt --install all"
 docker buildx use default
 
 for arch in "${ARCHES[@]}"; do
-    local_tag="${DOCKER_USER}/${IMAGE_NAME}:local-postgres${POSTGRES_VERSION}-bingo${BINGO_VERSION}-${arch}"
+    local_tag="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:local-postgres${POSTGRES_VERSION}-bingo${BINGO_VERSION}-${arch}"
     container_name="test-bingo-final-pg${POSTGRES_MAJOR_VERSION}-${arch}"
 
     trap 'cleanup_container "${container_name}"' EXIT

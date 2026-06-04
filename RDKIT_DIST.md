@@ -26,25 +26,25 @@ The resulting `rdkit.so` is still a PostgreSQL shared object, but it does not re
 Distribution image:
 
 ```text
-antonsiomchen/rdkit-postgres-dist:<rdkit-version>-postgres<postgres-major>
+ghcr.io/asiomchen/rdkit-postgres-dist:<rdkit-version>-postgres<postgres-major>
 ```
 
 Example:
 
 ```text
-antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
+ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Final runtime image:
 
 ```text
-antonsiomchen/cheminfo-db:rocky9-postgres<postgres-version>-rdkit<rdkit-version>
+ghcr.io/asiomchen/cheminfo-db:rocky9-postgres<postgres-version>-rdkit<rdkit-version>
 ```
 
 Example:
 
 ```text
-antonsiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5
+ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5
 ```
 
 ## What The Dist Image Contains
@@ -92,7 +92,7 @@ docker buildx build --platform linux/amd64 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
   --build-arg RDKIT_VERSION=2025.09.5 \
-  -t antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
+  -t ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
   --load \
   -f Dockerfile.dist .
 ```
@@ -105,7 +105,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
   --build-arg RDKIT_VERSION=2025.09.5 \
-  -t antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
+  -t ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
   --push \
   -f Dockerfile.dist .
 ```
@@ -115,13 +115,13 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 List the packaged files:
 
 ```bash
-docker run --rm antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
+docker run --rm ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Extract the archive locally:
 
 ```bash
-container_id="$(docker create antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
+container_id="$(docker create ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
 docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
 docker rm "${container_id}"
 tar -tzf ./rdkit-postgres.tgz
@@ -130,7 +130,7 @@ tar -tzf ./rdkit-postgres.tgz
 Verify that the cartridge does not depend on Boost or RDKit shared libraries:
 
 ```bash
-container_id="$(docker create antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
+container_id="$(docker create ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
 docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
 docker rm "${container_id}"
 mkdir -p /tmp/rdkit-postgres-dist
@@ -147,7 +147,7 @@ During the build, `Dockerfile.dist` also runs the same dependency check and fail
 The final `rdkit/Dockerfile` consumes the dist image with this build argument:
 
 ```text
-RDKIT_DIST_IMAGE=antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17
+RDKIT_DIST_IMAGE=ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17
 ```
 
 Build example:
@@ -158,8 +158,8 @@ docker buildx build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.10 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2025_09_5 \
-  --build-arg RDKIT_DIST_IMAGE=antonsiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
-  -t antonsiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5 \
+  --build-arg RDKIT_DIST_IMAGE=ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
+  -t ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5 \
   --load \
   -f Dockerfile .
 ```
@@ -183,7 +183,7 @@ docker run -d \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_DB=postgres \
   -p 55432:5432 \
-  antonsiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5
+  ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.10-rdkit2025.09.5
 ```
 
 Wait for readiness:
@@ -267,11 +267,11 @@ RDKit dist images are published by:
 
 Final RDKit database images are built by:
 
-- `.github/workflows/rdkit-build.yml` for the latest RDKit version available in `antonsiomchen/rdkit-postgres-dist`.
+- `.github/workflows/rdkit-build.yml` for the latest RDKit version available in `ghcr.io/asiomchen/rdkit-postgres-dist`.
 - `.github/workflows/rdkit-build-all.yml` for all available dist versions in the selected version range.
 - `.github/workflows/rdkit-reusable.yml` for the shared final image build, SQL verification, and manifest publish logic.
 
-The final image workflows discover tags from `antonsiomchen/rdkit-postgres-dist` and skip combinations where the matching dist image has not been published yet.
+The final image workflows discover tags from `ghcr.io/asiomchen/rdkit-postgres-dist` and skip combinations where the matching dist image has not been published yet.
 
 ## Runtime Dependencies
 

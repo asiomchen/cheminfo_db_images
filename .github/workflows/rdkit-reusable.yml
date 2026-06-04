@@ -9,19 +9,15 @@ on:
       merge_matrix:
         required: true
         type: string
-    secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_TOKEN:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
+permissions:
+  contents: write
+  packages: write
 
 env:
-  DOCKER_USER: antonsiomchen
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: asiomchen
   IMAGE_NAME: cheminfo-db
   ROCKY_VERSION: "9"
-  MANIFEST_PUSH_DELAY_SECONDS: "10"
 
 jobs:
   build:
@@ -39,11 +35,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v4.1.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build image (local for testing)
         run: |
@@ -94,7 +91,7 @@ jobs:
 
       - name: Push image by digest
         run: |
-          REPO="${DOCKER_USER}/${IMAGE_NAME}"
+          REPO="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}"
           mkdir -p /tmp/digests
 
           docker buildx build \
@@ -138,15 +135,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v4.1.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push multi-arch manifests
         run: |
-          BASE="${DOCKER_USER}/${IMAGE_NAME}"
+          BASE="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}"
           MINOR="${{ matrix.pg_minor }}"
           MAJOR="${{ matrix.pg_major }}"
           RDKIT="${{ matrix.rdkit_clean }}"
@@ -171,14 +169,10 @@ jobs:
               -t "${BASE}:${tag}" \
               ${IMAGES}
 
-            if [ "$i" -lt "$(( ${#TAGS[@]} - 1 ))" ]; then
-              echo "Sleeping ${MANIFEST_PUSH_DELAY_SECONDS}s to avoid Docker Hub rate limits"
-              sleep "${MANIFEST_PUSH_DELAY_SECONDS}"
-            fi
           done
 
   update-docs:
-    name: Update README and Docker Hub description
+    name: Update README
     needs: merge-manifest
     runs-on: ubuntu-24.04
     concurrency:
@@ -189,31 +183,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Query Docker Hub and update version files
+      - name: Query GHCR and update version files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
         run: |
           python3 << 'PYEOF'
-          import json, re, sys, urllib.request
+          import re
+          import sys
 
-          def fetch_json(url):
-              with urllib.request.urlopen(url) as resp:
-                  return json.loads(resp.read())
+          from scripts.registry_helpers import list_ghcr_tags
 
           def get_rdkit_versions():
               versions = set()
-              url = "https://hub.docker.com/v2/repositories/antonsiomchen/cheminfo-db/tags/?page_size=100"
               pattern = re.compile(r'^rocky9-postgres\d+\.\d+-rdkit(\d+\.\d+\.\d+)$')
-              while url:
-                  data = fetch_json(url)
-                  for tag_info in data.get("results", []):
-                      m = pattern.match(tag_info["name"])
-                      if m:
-                          versions.add(m.group(1))
-                  url = data.get("next")
+              for tag in list_ghcr_tags("cheminfo-db"):
+                  m = pattern.match(tag)
+                  if m:
+                      versions.add(m.group(1))
               return sorted(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
 
           versions = get_rdkit_versions()
           if not versions:
-              print("No RDKit versions found on Docker Hub, skipping update")
+              print("No RDKit versions found on GHCR, skipping update")
               sys.exit(0)
 
           latest = versions[-1]
@@ -235,7 +227,7 @@ jobs:
           else:
               print("README.md unchanged")
 
-          with open("docker-hub-summary.md") as f:
+          with open("ghcr-summary.md") as f:
               content = f.read()
           new_content = re.sub(
               r'(### RDKit Versions\n- ).*',
@@ -243,24 +235,16 @@ jobs:
               content,
           )
           if new_content != content:
-              with open("docker-hub-summary.md", "w") as f:
+              with open("ghcr-summary.md", "w") as f:
                   f.write(new_content)
-              print("Updated docker-hub-summary.md")
+              print("Updated ghcr-summary.md")
           else:
-              print("docker-hub-summary.md unchanged")
+              print("ghcr-summary.md unchanged")
           PYEOF
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md docker-hub-summary.md
+          git add README.md ghcr-summary.md
           git diff --staged --quiet || (git commit -m "docs: update supported RDKit versions" && git push)
-
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v5.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          repository: antonsiomchen/cheminfo-db
-          readme-filepath: docker-hub-summary.md

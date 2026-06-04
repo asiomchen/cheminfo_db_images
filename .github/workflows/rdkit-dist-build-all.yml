@@ -15,9 +15,13 @@ on:
 #     - cron: '0 12 * * *'
 
 env:
-  DOCKER_USER: antonsiomchen
+  IMAGE_OWNER: asiomchen
   IMAGE_NAME: rdkit-postgres-dist
   PG_MAJORS: "16 17 18"
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   detect-versions:
@@ -28,17 +32,21 @@ jobs:
       merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
       has_builds: ${{ steps.detect.outputs.has_builds }}
     steps:
-      - name: Detect versions and check Docker Hub
+      - uses: actions/checkout@v6.0.2
+
+      - name: Detect versions and check GHCR
         id: detect
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
           MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
           MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
         run: |
           python3 << 'EOF'
           import json, os, re, urllib.error, urllib.request
 
-          DOCKER_USER = os.environ["DOCKER_USER"]
+          from scripts.registry_helpers import ghcr_tag_exists
+
           IMAGE_NAME = os.environ["IMAGE_NAME"]
           PG_MAJORS = os.environ["PG_MAJORS"].split()
           GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
@@ -78,13 +86,7 @@ jobs:
               return sorted(releases, key=lambda r: version_tuple(r["clean"]))
 
           def tag_exists(tag):
-              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
-              req = urllib.request.Request(url, method="HEAD")
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      return resp.status == 200
-              except urllib.error.HTTPError as e:
-                  return e.code != 404
+              return ghcr_tag_exists(IMAGE_NAME, tag)
 
           def main():
               rdkit_releases = get_rdkit_releases(MIN_VERSION, MAX_VERSION)
@@ -141,6 +143,3 @@ jobs:
     with:
       matrix: ${{ needs.detect-versions.outputs.matrix }}
       merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

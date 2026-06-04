@@ -16,9 +16,11 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
-  DOCKER_USER: antonsiomchen
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: asiomchen
   IMAGE_NAME: cheminfo-db
   DIST_IMAGE_NAME: bingo-dist
   ROCKY_VERSION: "9"
@@ -33,16 +35,23 @@ jobs:
       merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
       has_builds: ${{ steps.detect.outputs.has_builds }}
     steps:
-      - name: Detect versions and check Docker Hub
+      - uses: actions/checkout@v6.0.2
+
+      - name: Detect versions and check GHCR
         id: detect
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
           MIN_BINGO_VERSION_INPUT: ${{ inputs.min_bingo_version }}
           MAX_BINGO_VERSION_INPUT: ${{ inputs.max_bingo_version }}
         run: |
           python3 << 'EOF'
-          import json, os, re, urllib.request
+          import json, os, re
 
-          DOCKER_USER = os.environ["DOCKER_USER"]
+          from scripts.registry_helpers import latest_pg_minor, list_ghcr_tags
+
+          REGISTRY = os.environ["REGISTRY"]
+          IMAGE_OWNER = os.environ["IMAGE_OWNER"]
           IMAGE_NAME  = os.environ["IMAGE_NAME"]
           DIST_IMAGE_NAME = os.environ["DIST_IMAGE_NAME"]
           ROCKY_VERSION = os.environ["ROCKY_VERSION"]
@@ -50,47 +59,28 @@ jobs:
           MIN_VERSION = os.environ.get("MIN_BINGO_VERSION_INPUT") or "1.34.0"
           MAX_VERSION = os.environ.get("MAX_BINGO_VERSION_INPUT") or None
 
-          def fetch_json(url):
-              with urllib.request.urlopen(url) as resp:
-                  return json.loads(resp.read())
-
           def get_latest_pg_minor(major):
-              url = f"https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&name={major}."
-              data = fetch_json(url)
-              pattern = re.compile(r'^' + re.escape(str(major)) + r'\.\d+$')
-              tags = [r["name"] for r in data["results"] if pattern.match(r["name"])]
-              tags.sort(key=lambda s: [int(u) for u in s.split(".")])
-              return tags[-1] if tags else None
+              return latest_pg_minor(major)
 
           def version_tuple(v):
               return tuple(int(x) for x in v.split("."))
 
           def get_dist_versions_by_pg_major():
               versions = {}
-              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{DIST_IMAGE_NAME}/tags/?page_size=100"
               pattern = re.compile(r"^(\d+\.\d+\.\d+)-postgres(\d+)$")
-              while url:
-                  data = fetch_json(url)
-                  for tag_info in data.get("results", []):
-                      match = pattern.match(tag_info["name"])
-                      if not match:
-                          continue
-                      bingo_version, pg_major = match.groups()
-                      versions.setdefault(pg_major, set()).add(bingo_version)
-                  url = data.get("next")
+              for tag in list_ghcr_tags(DIST_IMAGE_NAME):
+                  match = pattern.match(tag)
+                  if not match:
+                      continue
+                  bingo_version, pg_major = match.groups()
+                  versions.setdefault(pg_major, set()).add(bingo_version)
               return {
                   pg_major: sorted(pg_versions, key=version_tuple)
                   for pg_major, pg_versions in versions.items()
               }
 
           def tag_exists(tag):
-              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
-              req = urllib.request.Request(url, method="HEAD")
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      return resp.status == 200
-              except urllib.error.HTTPError as e:
-                  return e.code != 404
+              return tag in set(list_ghcr_tags(IMAGE_NAME))
 
           def main():
               min_v = version_tuple(MIN_VERSION)
@@ -135,7 +125,7 @@ jobs:
                               "pg_minor": minor,
                               "pg_major": major,
                               "bingo_version": bingo_version,
-                              "bingo_dist_image": f"{DOCKER_USER}/{DIST_IMAGE_NAME}:{bingo_version}-postgres{major}",
+                              "bingo_dist_image": f"{REGISTRY}/{IMAGE_OWNER}/{DIST_IMAGE_NAME}:{bingo_version}-postgres{major}",
                               "arch": arch,
                               "runner": runner,
                               "platform": platform,
@@ -166,7 +156,3 @@ jobs:
     with:
       matrix: ${{ needs.detect-versions.outputs.matrix }}
       merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}

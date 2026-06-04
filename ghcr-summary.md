@@ -1,7 +1,8 @@
-# Docker Hub Tags Summary
+# GHCR Tags Summary
 
 This repository provides Docker images for PostgreSQL with cheminformatics extensions (RDKit and Bingo).
 
+Images are published under `ghcr.io/asiomchen`.
 
 ## Tag Naming Convention
 
@@ -67,7 +68,7 @@ docker run -d \
   -e POSTGRES_DB=chemistry \
   -p 5432:5432 \
   -v pgdata:/var/lib/postgresql/17/data \
-  antonsiomchen/cheminfo-db:postgres17-rdkit2024.03.6
+  ghcr.io/asiomchen/cheminfo-db:postgres17-rdkit2024.03.6
 ```
 
 ### Bingo
@@ -78,7 +79,7 @@ docker run -d \
   -e POSTGRES_DB=chemistry \
   -p 5432:5432 \
   -v pgdata:/var/lib/postgresql/17/data \
-  antonsiomchen/cheminfo-db:postgres17-bingo1.36.0
+  ghcr.io/asiomchen/cheminfo-db:postgres17-bingo1.36.0
 ```
 
 ## Supported Versions

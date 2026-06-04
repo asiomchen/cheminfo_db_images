@@ -2,16 +2,14 @@
 
 # Cheminformatic Database Images
 
-[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://hub.docker.com/repository/docker/antonsiomchen/cheminfo-db)
-![Docker Pulls](https://img.shields.io/docker/pulls/antonsiomchen/cheminfo-db?style=flat-square)
-![Docker Stars](https://img.shields.io/docker/stars/antonsiomchen/cheminfo-db)
+[![GHCR](https://img.shields.io/badge/GHCR-cheminfo--db-2496ED?logo=github&logoColor=fff)](https://github.com/asiomchen/cheminfo_db_images/pkgs/container/cheminfo-db)
 
 
 Yet another PostgreSQL images with pre-installed **RDKit** or **Bingo** extensions, built on **Rocky Linux 9**.
 
 Supports **linux/amd64** and **linux/arm64** architectures.
 
-**Due to the Docker restrictive API limits, repo is in process of being migrated to GitHub. Please check back later for the new location.**
+Images are published to GitHub Container Registry under `ghcr.io/asiomchen`.
 
 ## Quick Start
 
@@ -24,7 +22,7 @@ docker run -d \
   -e POSTGRES_DB=chemistry \
   -p 5432:5432 \
   -v pgdata:/var/lib/postgresql/data \
-  antonsiomchen/cheminfo-db:postgres17-rdkit2024.03.6
+  ghcr.io/asiomchen/cheminfo-db:postgres17-rdkit2024.03.6
 ```
 
 ## Image Tagging
@@ -57,7 +55,7 @@ We provide flexible tagging to suit your needs:
 
 ## Environment Variables
 
-Supports all [standard PostgreSQL environment variables](https://hub.docker.com/_/postgres):
+Supports the standard PostgreSQL image environment variables:
 
 - `POSTGRES_PASSWORD`: (Required) Password for the superuser.
 - `POSTGRES_USER`: (Optional) Default is `postgres`.

@@ -12,7 +12,8 @@ LABEL org.opencontainers.image.title="Bingo PostgreSQL distribution builder" \
     org.opencontainers.image.description="Builds a Bingo PostgreSQL distribution archive from Indigo source" \
     org.opencontainers.image.vendor="Cheminfo" \
     org.opencontainers.image.version="${BINGO_VERSION}" \
-    org.opencontainers.image.licenses="Apache-2.0"
+    org.opencontainers.image.licenses="Apache-2.0" \
+    org.opencontainers.image.source="https://github.com/asiomchen/cheminfo_db_images"
 
 RUN set -eux; \
     ARCH="$(uname -m)"; \
@@ -97,6 +98,7 @@ LABEL org.opencontainers.image.title="Bingo PostgreSQL distribution archive" \
     org.opencontainers.image.vendor="Cheminfo" \
     org.opencontainers.image.version="${BINGO_VERSION}" \
     org.opencontainers.image.licenses="Apache-2.0" \
+    org.opencontainers.image.source="https://github.com/asiomchen/cheminfo_db_images" \
     io.cheminfo.bingo.postgres-major="${POSTGRES_MAJOR_VERSION}"
 
 RUN apk add --no-cache tar

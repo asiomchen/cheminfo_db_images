@@ -3,7 +3,8 @@ echo "set -euo pipefail"
 set -euo pipefail
 
 # Configuration
-DOCKER_USER="antonsiomchen"
+REGISTRY="ghcr.io"
+IMAGE_OWNER="asiomchen"
 IMAGE_NAME="cheminfo-db"
 DIST_IMAGE_NAME="rdkit-postgres-dist"
 
@@ -14,23 +15,7 @@ RDKIT_VERSIONS=("2024_03_6" "2024_09_4" "2025_09_4" "2025_09_5")
 
 get_latest_pg_minor() {
     local major_ver=$1
-    local output
-    output=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&name=${major_ver}.")
-
-    echo "$output" | python3 -c "
-import sys, json, re
-try:
-    data = json.load(sys.stdin)
-    major_ver = sys.argv[1]
-    tags = [r['name'] for r in data['results']]
-    regex = re.compile(r'^' + re.escape(major_ver) + r'\.\d+$')
-    valid_tags = [t for t in tags if regex.match(t)]
-    valid_tags.sort(key=lambda s: [int(u) for u in s.split('.')])
-    if valid_tags:
-        print(valid_tags[-1])
-except Exception:
-    pass
-" "$major_ver"
+    python3 ../scripts/registry_helpers.py latest-pg-minor "$major_ver"
 }
 
 dist_image_ref() {
@@ -38,7 +23,7 @@ dist_image_ref() {
     local rdkit_version=$2
 
     local clean_rdkit_version=$(echo $rdkit_version | sed 's/Release_//g' | sed 's/_/./g')
-    echo "${DOCKER_USER}/${DIST_IMAGE_NAME}:${clean_rdkit_version}-postgres${postgres_major_version}"
+    echo "${REGISTRY}/${IMAGE_OWNER}/${DIST_IMAGE_NAME}:${clean_rdkit_version}-postgres${postgres_major_version}"
 }
 
 build_dist_local_cmd() {
@@ -99,7 +84,7 @@ build_local_cmd() {
     echo "    --build-arg POSTGRES_MAJOR_VERSION=${postgres_major_version} \\"
     echo "    --build-arg RDKIT_GIT_REF=Release_${rdkit_version} \\"
     echo "    --build-arg RDKIT_DIST_IMAGE=${dist_ref} \\"
-    echo "    -t ${DOCKER_USER}/${IMAGE_NAME}:${build_tag} \\"
+    echo "    -t ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:${build_tag} \\"
     echo "    --load \\"
     echo "    -f Dockerfile . 2>&1 | tee build-${build_tag}.log"
     echo ""
@@ -107,7 +92,7 @@ build_local_cmd() {
 
 test_image() {
     local image_tag=$1
-    echo "docker run -d -p 5432:5432 --name test-${image_tag} -e POSTGRES_PASSWORD=postgres ${DOCKER_USER}/${IMAGE_NAME}:${image_tag}"
+    echo "docker run -d -p 5432:5432 --name test-${image_tag} -e POSTGRES_PASSWORD=postgres ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:${image_tag}"
     echo "sleep 5"
     echo "docker exec test-${image_tag} psql -U postgres -c \"SELECT rdkit_version();SELECT mol_logp(mol_from_smiles('CCO'));\""
     echo "PGPASSWORD=postgres psql -U postgres -p 5432 -h localhost -c \"SELECT rdkit_version(); SELECT is_valid_smiles('CCO');\""
@@ -129,11 +114,11 @@ push_multiarch_cmd() {
     local dist_ref
     dist_ref=$(dist_image_ref "$postgres_major_version" "$rdkit_version")
 
-    local tag_args="-t ${DOCKER_USER}/${IMAGE_NAME}:${build_tag}"
-    tag_args+=" \\"$'\n'"    -t ${DOCKER_USER}/${IMAGE_NAME}:rocky${rocky_version}-postgres${postgres_major_version}-rdkit${clean_rdkit_version}"
+    local tag_args="-t ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:${build_tag}"
+    tag_args+=" \\"$'\n'"    -t ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:rocky${rocky_version}-postgres${postgres_major_version}-rdkit${clean_rdkit_version}"
     if [ "$rocky_version" == "9" ]; then
-        tag_args+=" \\"$'\n'"    -t ${DOCKER_USER}/${IMAGE_NAME}:postgres${postgres_major_version}-rdkit${clean_rdkit_version}"
-        tag_args+=" \\"$'\n'"    -t ${DOCKER_USER}/${IMAGE_NAME}:postgres${postgres_minor_version}-rdkit${clean_rdkit_version}"
+        tag_args+=" \\"$'\n'"    -t ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:postgres${postgres_major_version}-rdkit${clean_rdkit_version}"
+        tag_args+=" \\"$'\n'"    -t ${REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}:postgres${postgres_minor_version}-rdkit${clean_rdkit_version}"
     fi
 
     echo "echo Pushing multi-arch: ${build_tag}"

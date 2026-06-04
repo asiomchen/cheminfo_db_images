@@ -14,8 +14,12 @@ on:
         type: string
 
 env:
-  DOCKER_USER: antonsiomchen
+  IMAGE_OWNER: asiomchen
   IMAGE_NAME: rdkit-postgres-dist
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   prepare-matrix:
@@ -26,16 +30,21 @@ jobs:
       merge_matrix: ${{ steps.prepare.outputs.merge_matrix }}
       has_builds: ${{ steps.prepare.outputs.has_builds }}
     steps:
-      - name: Validate input and check Docker Hub
+      - uses: actions/checkout@v6.0.2
+
+      - name: Validate input and check GHCR
         id: prepare
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
           RDKIT_REF: ${{ inputs.rdkit_ref }}
           PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
           python3 << 'EOF'
-          import json, os, re, urllib.error, urllib.request
+          import json, os, re
 
-          DOCKER_USER = os.environ["DOCKER_USER"]
+          from scripts.registry_helpers import ghcr_tag_exists
+
           IMAGE_NAME = os.environ["IMAGE_NAME"]
           RDKIT_REF = os.environ["RDKIT_REF"].strip()
           PG_MAJORS_INPUT = os.environ["PG_MAJORS_INPUT"].strip()
@@ -67,13 +76,7 @@ jobs:
               return unique_values
 
           def tag_exists(tag):
-              url = f"https://hub.docker.com/v2/repositories/{DOCKER_USER}/{IMAGE_NAME}/tags/{tag}/"
-              req = urllib.request.Request(url, method="HEAD")
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      return resp.status == 200
-              except urllib.error.HTTPError as e:
-                  return e.code != 404
+              return ghcr_tag_exists(IMAGE_NAME, tag)
 
           def main():
               rdkit_clean = parse_rdkit_ref(RDKIT_REF)
@@ -132,6 +135,3 @@ jobs:
     with:
       matrix: ${{ needs.prepare-matrix.outputs.matrix }}
       merge_matrix: ${{ needs.prepare-matrix.outputs.merge_matrix }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

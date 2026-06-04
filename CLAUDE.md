@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This repository contains Docker image definitions for PostgreSQL with cheminformatics extensions (RDKit and Bingo) built on Rocky Linux 9. Images are published to Docker Hub as `antonsiomchen/cheminfo-db`.
+This repository contains Docker image definitions for PostgreSQL with cheminformatics extensions (RDKit and Bingo) built on Rocky Linux 9. Images are published to GHCR as `ghcr.io/asiomchen/cheminfo-db`.
 
 ## Repository Structure
 
@@ -29,7 +29,7 @@ cd rdkit && ./build.sh > cmds.sh
 cd bingo && ./build.sh > cmds.sh
 ```
 
-`build.sh` fetches the latest PostgreSQL minor version from Docker Hub's registry API for each configured major version, then outputs shell commands to build, test, and push all version matrix combinations.
+`build.sh` fetches the latest PostgreSQL minor version from PGDG repository metadata for each configured major version, then outputs shell commands to build, test, and push all version matrix combinations.
 
 ### Build a single image manually
 
@@ -40,7 +40,7 @@ docker build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.7 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2024_03_6 \
-  -t antonsiomchen/cheminfo-db:rocky9-postgres17.7-rdkit2024.03.6 \
+  -t ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.7-rdkit2024.03.6 \
   -f rdkit/Dockerfile rdkit/
 
 # Bingo
@@ -49,7 +49,7 @@ docker build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.7 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg BINGO_VERSION=1.36.0 \
-  -t antonsiomchen/cheminfo-db:rocky9-postgres17.7-bingo1.36.0 \
+  -t ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.7-bingo1.36.0 \
   -f bingo/Dockerfile bingo/
 ```
 
@@ -57,7 +57,7 @@ docker build --platform linux/amd64 \
 
 ```bash
 # RDKit
-docker run -d -p 5432:5432 --name test-rdkit -e POSTGRES_PASSWORD=postgres antonsiomchen/cheminfo-db:<tag>
+docker run -d -p 5432:5432 --name test-rdkit -e POSTGRES_PASSWORD=postgres ghcr.io/asiomchen/cheminfo-db:<tag>
 sleep 5
 docker exec test-rdkit psql -U postgres -c "SELECT rdkit_version(); SELECT mol_logp(mol_from_smiles('CCO'));"
 docker stop test-rdkit && docker rm test-rdkit
