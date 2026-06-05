@@ -32,110 +32,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_OWNER: ${{ env.IMAGE_OWNER }}
         run: |
-          python3 << 'EOF'
-          import json, os, re
-
-          from scripts.registry_helpers import latest_pg_minor, list_ghcr_tags
-
-          REGISTRY = os.environ["REGISTRY"]
-          IMAGE_OWNER = os.environ["IMAGE_OWNER"]
-          IMAGE_NAME  = os.environ["IMAGE_NAME"]
-          DIST_IMAGE_NAME = os.environ["DIST_IMAGE_NAME"]
-          ROCKY_VERSION = os.environ["ROCKY_VERSION"]
-          PG_MAJORS   = os.environ["PG_MAJORS"].split()
-
-          def get_latest_pg_minor(major):
-              return latest_pg_minor(major)
-
-          def version_tuple(v):
-              return tuple(int(x) for x in v.split("."))
-
-          def get_dist_versions_by_pg_major():
-              versions = {}
-              pattern = re.compile(r"^(\d+\.\d+\.\d+)-postgres(\d+)$")
-              for tag in list_ghcr_tags(DIST_IMAGE_NAME):
-                  match = pattern.match(tag)
-                  if not match:
-                      continue
-                  bingo_version, pg_major = match.groups()
-                  versions.setdefault(pg_major, set()).add(bingo_version)
-              return {
-                  pg_major: sorted(pg_versions, key=version_tuple)
-                  for pg_major, pg_versions in versions.items()
-              }
-
-          def tag_exists(tag):
-              return tag in set(list_ghcr_tags(IMAGE_NAME))
-
-          def main():
-              dist_versions = get_dist_versions_by_pg_major()
-              latest_bingo = None
-              for pg_major in PG_MAJORS:
-                  versions = dist_versions.get(pg_major, [])
-                  if versions:
-                      candidate = versions[-1]
-                      if latest_bingo is None or version_tuple(candidate) > version_tuple(latest_bingo):
-                          latest_bingo = candidate
-
-              if not latest_bingo:
-                  print("ERROR: Could not detect any Bingo version from bingo-dist tags", flush=True)
-                  with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                      f.write("matrix={\"include\":[]}\n")
-                      f.write("merge_matrix={\"include\":[]}\n")
-                      f.write("has_builds=false\n")
-                  return
-              print(f"Latest Bingo version detected from bingo-dist tags: {latest_bingo}", flush=True)
-
-              matrix_entries = []
-              merge_entries = []
-
-              for major in PG_MAJORS:
-                  minor = get_latest_pg_minor(major)
-                  print(f"PG{major} latest minor: {minor}", flush=True)
-                  if not minor:
-                      continue
-
-                  if latest_bingo not in dist_versions.get(major, []):
-                      print(f"  -> No bingo-dist tag for Bingo {latest_bingo} + PG{major}, skipping", flush=True)
-                      continue
-
-                  tag = f"rocky{ROCKY_VERSION}-postgres{minor}-bingo{latest_bingo}"
-                  print(f"Checking GHCR for: {tag}", flush=True)
-                  if tag_exists(tag):
-                      print(f"  -> exists, skipping", flush=True)
-                      continue
-                  print(f"  -> missing, will build", flush=True)
-                  for arch, runner, platform in [
-                      ("amd64", "ubuntu-24.04", "linux/amd64"),
-                      ("arm64", "ubuntu-24.04-arm", "linux/arm64"),
-                  ]:
-                      matrix_entries.append({
-                          "pg_minor": minor,
-                          "pg_major": major,
-                          "bingo_version": latest_bingo,
-                          "bingo_dist_image": f"{REGISTRY}/{IMAGE_OWNER}/{DIST_IMAGE_NAME}:{latest_bingo}-postgres{major}",
-                          "arch": arch,
-                          "runner": runner,
-                          "platform": platform,
-                      })
-                  merge_entries.append({
-                      "pg_minor": minor,
-                      "pg_major": major,
-                      "bingo_version": latest_bingo,
-                  })
-
-              has_builds = len(matrix_entries) > 0
-              matrix = json.dumps({"include": matrix_entries})
-              merge_matrix = json.dumps({"include": merge_entries})
-              print(f"has_builds={has_builds}, {len(merge_entries)} combos to build", flush=True)
-
-              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                  f.write(f"matrix={matrix}\n")
-                  f.write(f"merge_matrix={merge_matrix}\n")
-                  f.write(f"has_builds={'true' if has_builds else 'false'}\n")
-
-          main()
-          EOF
+          python3 -m scripts.actions prepare-bingo-runtime \
+            --registry "${REGISTRY}" \
+            --image-owner "${IMAGE_OWNER}" \
+            --image-name "${IMAGE_NAME}" \
+            --dist-image-name "${DIST_IMAGE_NAME}" \
+            --rocky-version "${ROCKY_VERSION}" \
+            --pg-majors "${PG_MAJORS}"
 
   build-and-push:
     needs: detect-versions
