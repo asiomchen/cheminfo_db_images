@@ -60,9 +60,8 @@ Shell install example:
 ```bash
 export DB=chemistry
 
-container_id="$(docker create ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
-docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
-docker rm "${container_id}"
+docker run --rm ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
+  sh -c "cat /out/rdkit-postgres.tgz" > ./rdkit-postgres.tgz
 
 tar -xzf ./rdkit-postgres.tgz
 cd rdkit-postgres17-linux-*-rdkit2025.09.5
@@ -85,19 +84,17 @@ Shell install example:
 ```bash
 export DB=chemistry
 
-container_id="$(docker create ghcr.io/asiomchen/bingo-dist:1.43.0-postgres17)"
-docker cp "${container_id}:/out/bingo-postgres.tgz" ./bingo-postgres.tgz
-docker rm "${container_id}"
+docker run --rm ghcr.io/asiomchen/bingo-dist:1.43.0-postgres17 \
+  sh -c "cat /out/bingo-postgres.tgz" > ./bingo-postgres.tgz
 
 tar -xzf ./bingo-postgres.tgz
 cd bingo-postgres17-linux-*
 
-mkdir -p ./installed-lib
-sh ./bingo-pg-install.sh -libdir ./installed-lib -y
-
 sudo install -m 0755 \
-  ./installed-lib/libbingo-postgres.so \
-  "$(pg_config --pkglibdir)/bingo_postgres.so"
+  ./lib/libbingo-postgres.so \
+  "$(pg_config --pkglibdir)/libbingo-postgres.so"
+
+sh ./bingo-pg-install.sh -libdir "$(pg_config --pkglibdir)" -y
 
 psql -d "${DB}" -f ./bingo_install.sql
 psql -d "${DB}" -c "SELECT bingo.GetVersion();"
