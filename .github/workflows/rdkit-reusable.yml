@@ -66,23 +66,28 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             "${LOCAL_TAG}"
 
-          echo "Waiting for PostgreSQL to be ready..."
-          for i in $(seq 1 60); do
-            if docker exec "${CONTAINER}" pg_isready -U postgres 2>/dev/null; then
-              echo "PostgreSQL is ready after ${i}s"
-              break
-            fi
-            if [ "$i" = "60" ]; then
-              echo "Timed out waiting for PostgreSQL"
-              docker logs "${CONTAINER}"
-              docker stop "${CONTAINER}" && docker rm "${CONTAINER}"
-              exit 1
-            fi
-            sleep 1
-          done
+          retry_psql() {
+            local description=$1
+            local query=$2
 
-          docker exec "${CONTAINER}" psql -U postgres -c "SELECT rdkit_version();"
-          docker exec "${CONTAINER}" psql -U postgres -c "SELECT mol_logp(mol_from_smiles('CCO'));"
+            echo "Waiting for PostgreSQL: ${description}"
+            for i in $(seq 1 90); do
+              if docker exec "${CONTAINER}" psql -U postgres -v ON_ERROR_STOP=1 -c "${query}"; then
+                echo "PostgreSQL query succeeded after ${i}s: ${description}"
+                return 0
+              fi
+              if [ "$i" = "90" ]; then
+                echo "Timed out waiting for PostgreSQL: ${description}"
+                docker logs "${CONTAINER}"
+                docker stop "${CONTAINER}" && docker rm "${CONTAINER}"
+                exit 1
+              fi
+              sleep 1
+            done
+          }
+
+          retry_psql "RDKit version" "SELECT rdkit_version();"
+          retry_psql "RDKit mol_logp" "SELECT mol_logp(mol_from_smiles('CCO'));"
           docker exec "${CONTAINER}" sh -c "ldd /usr/pgsql-${{ matrix.pg_major }}/lib/rdkit.so | tee /tmp/rdkit-ldd.txt"
           docker exec "${CONTAINER}" sh -c "! grep -E 'libboost_|libRDKit' /tmp/rdkit-ldd.txt"
 
