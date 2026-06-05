@@ -51,6 +51,58 @@ ghcr.io/asiomchen/bingo-postgres:postgres17-bingo1.43.0
 
 Tags without the `rocky9-` prefix are Rocky Linux 9 aliases. Major-only PostgreSQL tags, such as `postgres17-rdkit2025.09.5`, point at the latest PostgreSQL minor version built for that major.
 
+## Using RDKit Dist with Existing PostgreSQL
+
+Use `ghcr.io/asiomchen/rdkit-postgres-dist` to install RDKit into an existing PostgreSQL installation. Choose a dist tag that matches the target PostgreSQL major version and CPU architecture, and run `pg_config` from the same PostgreSQL installation you are modifying. The dist artifacts are built on Rocky Linux 9, so use them with a compatible glibc-based Linux environment.
+
+Shell install example:
+
+```bash
+export DB=chemistry
+
+container_id="$(docker create ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
+docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
+docker rm "${container_id}"
+
+tar -xzf ./rdkit-postgres.tgz
+cd rdkit-postgres17-linux-*-rdkit2025.09.5
+
+sudo sh ./rdkit-pg-install.sh \
+  -libdir "$(pg_config --pkglibdir)" \
+  -sharedir "$(pg_config --sharedir)/extension" \
+  -y
+
+psql -d "${DB}" -c "CREATE EXTENSION IF NOT EXISTS rdkit;"
+psql -d "${DB}" -c "SELECT rdkit_version();"
+```
+
+## Using Bingo Dist with Existing PostgreSQL
+
+Use `ghcr.io/asiomchen/bingo-dist` to install Bingo into an existing PostgreSQL installation. Choose a dist tag that matches the target PostgreSQL major version and CPU architecture, and run `pg_config` from the same PostgreSQL installation you are modifying. The dist artifacts are built on Rocky Linux 9, so use them with a compatible glibc-based Linux environment.
+
+Shell install example:
+
+```bash
+export DB=chemistry
+
+container_id="$(docker create ghcr.io/asiomchen/bingo-dist:1.43.0-postgres17)"
+docker cp "${container_id}:/out/bingo-postgres.tgz" ./bingo-postgres.tgz
+docker rm "${container_id}"
+
+tar -xzf ./bingo-postgres.tgz
+cd bingo-postgres17-linux-*
+
+mkdir -p ./installed-lib
+sh ./bingo-pg-install.sh -libdir ./installed-lib -y
+
+sudo install -m 0755 \
+  ./installed-lib/libbingo-postgres.so \
+  "$(pg_config --pkglibdir)/bingo_postgres.so"
+
+psql -d "${DB}" -f ./bingo_install.sql
+psql -d "${DB}" -c "SELECT bingo.GetVersion();"
+```
+
 ## RDKit Dist
 
 `ghcr.io/asiomchen/rdkit-postgres-dist` is a small artifact image containing a packaged RDKit PostgreSQL cartridge for one RDKit version and one PostgreSQL major version. It is intended for building final runtime images, not for running PostgreSQL directly.
