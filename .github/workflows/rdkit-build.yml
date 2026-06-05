@@ -2,6 +2,36 @@ name: Build RDKit Images
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Build mode
+        required: true
+        default: single
+        type: choice
+        options:
+          - single
+          - range
+      rdkit_version:
+        description: RDKit version for single mode, for example 2025.09.5
+        required: false
+        type: string
+      min_rdkit_version:
+        description: Minimum RDKit version for range mode, for example 2025.03.1
+        required: false
+        default: "2025.03.1"
+        type: string
+      max_rdkit_version:
+        description: Maximum RDKit version for range mode, for example 2025.09.1
+        required: false
+        default: ""
+        type: string
+      pg_majors:
+        description: PostgreSQL majors to build, separated by spaces or commas
+        required: false
+        default: "16 17 18"
+        type: string
+  schedule:
+    - cron: "0 18 * * *"
 
 permissions:
   contents: write
@@ -14,36 +44,51 @@ env:
   DIST_IMAGE_NAME: rdkit-postgres-dist
   ROCKY_VERSION: "9"
   PG_MAJORS: "16 17 18"
+  DEFAULT_MIN_RDKIT_VERSION: "2025.03.1"
 
 jobs:
-  detect-versions:
-    name: Detect versions and find missing builds
+  prepare-matrix:
+    name: Prepare runtime build matrix
     runs-on: ubuntu-24.04
     outputs:
-      matrix: ${{ steps.detect.outputs.matrix }}
-      merge_matrix: ${{ steps.detect.outputs.merge_matrix }}
-      has_builds: ${{ steps.detect.outputs.has_builds }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      merge_matrix: ${{ steps.prepare.outputs.merge_matrix }}
+      has_builds: ${{ steps.prepare.outputs.has_builds }}
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Detect versions and check GHCR
-        id: detect
+      - name: Resolve versions and check GHCR
+        id: prepare
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_OWNER: ${{ env.IMAGE_OWNER }}
+          MODE_INPUT: ${{ inputs.mode }}
+          RDKIT_VERSION_INPUT: ${{ inputs.rdkit_version }}
+          MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
+          MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
+          PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
+          MODE="${MODE_INPUT:-range}"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            MODE="range"
+          fi
+
           python3 -m scripts.actions prepare-rdkit-runtime \
             --registry "${REGISTRY}" \
             --image-owner "${IMAGE_OWNER}" \
             --image-name "${IMAGE_NAME}" \
             --dist-image-name "${DIST_IMAGE_NAME}" \
             --rocky-version "${ROCKY_VERSION}" \
-            --pg-majors "${PG_MAJORS}"
+            --pg-majors "${PG_MAJORS_INPUT:-${PG_MAJORS}}" \
+            --mode "${MODE}" \
+            --rdkit-version "${RDKIT_VERSION_INPUT}" \
+            --min-rdkit-version "${MIN_RDKIT_VERSION_INPUT:-${DEFAULT_MIN_RDKIT_VERSION}}" \
+            --max-rdkit-version "${MAX_RDKIT_VERSION_INPUT}"
 
   build-and-push:
-    needs: detect-versions
-    if: needs.detect-versions.outputs.has_builds == 'true'
+    needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.has_builds == 'true'
     uses: ./.github/workflows/rdkit-reusable.yml
     with:
-      matrix: ${{ needs.detect-versions.outputs.matrix }}
-      merge_matrix: ${{ needs.detect-versions.outputs.merge_matrix }}
+      matrix: ${{ needs.prepare-matrix.outputs.matrix }}
+      merge_matrix: ${{ needs.prepare-matrix.outputs.merge_matrix }}

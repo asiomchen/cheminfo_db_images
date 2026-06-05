@@ -81,6 +81,9 @@ jobs:
             sleep 1
           done
 
+          echo "Waiting 5s for Bingo initialization tables..."
+          sleep 5
+
           docker exec "${CONTAINER}" psql -U postgres -c "SELECT bingo.GetVersion();"
 
           docker stop "${CONTAINER}"

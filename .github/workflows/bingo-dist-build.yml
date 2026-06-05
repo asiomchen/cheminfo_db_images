@@ -16,22 +16,28 @@ on:
         required: false
         type: string
       min_bingo_version:
-        description: Minimum Bingo version for range mode, for example 1.40.0
+        description: Minimum Bingo version for range mode, for example 1.34.0
         required: false
+        default: "1.34.0"
         type: string
       max_bingo_version:
         description: Maximum Bingo version for range mode, for example 1.43.0
         required: false
+        default: ""
         type: string
       pg_majors:
         description: PostgreSQL majors to build, separated by spaces or commas
         required: false
         default: "15 16 17"
         type: string
+  schedule:
+    - cron: "0 4 * * *"
 
 env:
   IMAGE_OWNER: asiomchen
   IMAGE_NAME: bingo-dist
+  PG_MAJORS: "15 16 17"
+  DEFAULT_MIN_BINGO_VERSION: "1.34.0"
 
 permissions:
   contents: read
@@ -39,7 +45,7 @@ permissions:
 
 jobs:
   prepare-matrix:
-    name: Prepare build matrix
+    name: Prepare dist build matrix
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.prepare.outputs.matrix }}
@@ -53,19 +59,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_OWNER: ${{ env.IMAGE_OWNER }}
-          MODE: ${{ inputs.mode }}
+          MODE_INPUT: ${{ inputs.mode }}
           BINGO_VERSION_INPUT: ${{ inputs.bingo_version }}
           MIN_BINGO_VERSION_INPUT: ${{ inputs.min_bingo_version }}
           MAX_BINGO_VERSION_INPUT: ${{ inputs.max_bingo_version }}
           PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
+          MODE="${MODE_INPUT:-range}"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            MODE="range"
+          fi
+
           python3 -m scripts.actions prepare-bingo-dist \
             --image-name "${IMAGE_NAME}" \
             --mode "${MODE}" \
             --bingo-version "${BINGO_VERSION_INPUT}" \
-            --min-bingo-version "${MIN_BINGO_VERSION_INPUT}" \
+            --min-bingo-version "${MIN_BINGO_VERSION_INPUT:-${DEFAULT_MIN_BINGO_VERSION}}" \
             --max-bingo-version "${MAX_BINGO_VERSION_INPUT}" \
-            --pg-majors "${PG_MAJORS_INPUT}"
+            --pg-majors "${PG_MAJORS_INPUT:-${PG_MAJORS}}"
 
   build-and-push:
     needs: prepare-matrix

@@ -60,9 +60,8 @@ Shell install example:
 ```bash
 export DB=chemistry
 
-container_id="$(docker create ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17)"
-docker cp "${container_id}:/out/rdkit-postgres.tgz" ./rdkit-postgres.tgz
-docker rm "${container_id}"
+docker run --rm ghcr.io/asiomchen/rdkit-postgres-dist:2025.09.5-postgres17 \
+  sh -c "cat /out/rdkit-postgres.tgz" > ./rdkit-postgres.tgz
 
 tar -xzf ./rdkit-postgres.tgz
 cd rdkit-postgres17-linux-*-rdkit2025.09.5
@@ -85,23 +84,31 @@ Shell install example:
 ```bash
 export DB=chemistry
 
-container_id="$(docker create ghcr.io/asiomchen/bingo-dist:1.43.0-postgres17)"
-docker cp "${container_id}:/out/bingo-postgres.tgz" ./bingo-postgres.tgz
-docker rm "${container_id}"
+docker run --rm ghcr.io/asiomchen/bingo-dist:1.43.0-postgres17 \
+  sh -c "cat /out/bingo-postgres.tgz" > ./bingo-postgres.tgz
 
 tar -xzf ./bingo-postgres.tgz
 cd bingo-postgres17-linux-*
 
-mkdir -p ./installed-lib
-sh ./bingo-pg-install.sh -libdir ./installed-lib -y
-
 sudo install -m 0755 \
-  ./installed-lib/libbingo-postgres.so \
-  "$(pg_config --pkglibdir)/bingo_postgres.so"
+  ./lib/libbingo-postgres.so \
+  "$(pg_config --pkglibdir)/libbingo-postgres.so"
+
+sh ./bingo-pg-install.sh -libdir "$(pg_config --pkglibdir)" -y
 
 psql -d "${DB}" -f ./bingo_install.sql
 psql -d "${DB}" -c "SELECT bingo.GetVersion();"
 ```
+
+## Example Dockerfiles
+
+The `examples/` directory shows how to consume dist images from official PostgreSQL `trixie` images:
+
+| Example | Description |
+| :--- | :--- |
+| [`examples/rdkit-postgres-trixie/Dockerfile`](examples/rdkit-postgres-trixie/Dockerfile) | Installs RDKit from `rdkit-postgres-dist` into `postgres:17-trixie` and creates the extension in `public`. |
+| [`examples/rdkit-postgres-trixie-molecules-schema/Dockerfile`](examples/rdkit-postgres-trixie-molecules-schema/Dockerfile) | Installs RDKit into a `molecules` schema and sets the database `search_path` to `molecules, public`. |
+| [`examples/bingo-postgres-trixie/Dockerfile`](examples/bingo-postgres-trixie/Dockerfile) | Installs Bingo from `bingo-dist` into `postgres:17-trixie`. |
 
 ## RDKit Dist
 
