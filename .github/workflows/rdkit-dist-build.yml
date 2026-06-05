@@ -40,93 +40,10 @@ jobs:
           RDKIT_REF: ${{ inputs.rdkit_ref }}
           PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
-          python3 << 'EOF'
-          import json, os, re
-
-          from scripts.registry_helpers import ghcr_tag_exists
-
-          IMAGE_NAME = os.environ["IMAGE_NAME"]
-          RDKIT_REF = os.environ["RDKIT_REF"].strip()
-          PG_MAJORS_INPUT = os.environ["PG_MAJORS_INPUT"].strip()
-
-          def parse_rdkit_ref(rdkit_ref):
-              match = re.fullmatch(r"Release_(\d{4})_(\d{2})_(\d+)", rdkit_ref)
-              if not match:
-                  raise RuntimeError(
-                      "Unexpected RDKit tag format: "
-                      f"{rdkit_ref}. Expected Release_YYYY_MM_PATCH"
-                  )
-              return ".".join(match.groups())
-
-          def parse_pg_majors(raw_value):
-              values = [value for value in re.split(r"[\s,]+", raw_value) if value]
-              if not values:
-                  raise RuntimeError("No PostgreSQL majors provided")
-
-              unique_values = []
-              seen = set()
-              for value in values:
-                  if not re.fullmatch(r"\d+", value):
-                      raise RuntimeError(
-                          f"Unexpected PostgreSQL major value: {value}"
-                      )
-                  if value not in seen:
-                      seen.add(value)
-                      unique_values.append(value)
-              return unique_values
-
-          def tag_exists(tag):
-              return ghcr_tag_exists(IMAGE_NAME, tag)
-
-          def main():
-              rdkit_clean = parse_rdkit_ref(RDKIT_REF)
-              pg_majors = parse_pg_majors(PG_MAJORS_INPUT)
-
-              print(
-                  f"Manual dist build: {RDKIT_REF} -> {rdkit_clean}",
-                  flush=True,
-              )
-              print(f"Requested PostgreSQL majors: {' '.join(pg_majors)}", flush=True)
-
-              matrix_entries = []
-              merge_entries = []
-
-              for pg_major in pg_majors:
-                  tag = f"{rdkit_clean}-postgres{pg_major}"
-                  print(f"Checking: {tag}", flush=True)
-                  if tag_exists(tag):
-                      print("  -> exists, skipping", flush=True)
-                      continue
-
-                  print("  -> missing, will build", flush=True)
-                  for arch, runner, platform in [
-                      ("amd64", "ubuntu-24.04", "linux/amd64"),
-                      ("arm64", "ubuntu-24.04-arm", "linux/arm64"),
-                  ]:
-                      matrix_entries.append({
-                          "pg_major": pg_major,
-                          "rdkit_ref": RDKIT_REF,
-                          "rdkit_clean": rdkit_clean,
-                          "arch": arch,
-                          "runner": runner,
-                          "platform": platform,
-                      })
-                  merge_entries.append({
-                      "pg_major": pg_major,
-                      "rdkit_clean": rdkit_clean,
-                  })
-
-              has_builds = len(matrix_entries) > 0
-              matrix = json.dumps({"include": matrix_entries})
-              merge_matrix = json.dumps({"include": merge_entries})
-
-              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                  f.write(f"matrix={matrix}\n")
-                  f.write(f"merge_matrix={merge_matrix}\n")
-                  f.write(f"has_builds={'true' if has_builds else 'false'}\n")
-
-          main()
-          EOF
+          python3 -m scripts.actions prepare-rdkit-dist \
+            --image-name "${IMAGE_NAME}" \
+            --rdkit-ref "${RDKIT_REF}" \
+            --pg-majors "${PG_MAJORS_INPUT}"
 
   build-and-push:
     needs: prepare-matrix

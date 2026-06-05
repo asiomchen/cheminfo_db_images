@@ -1,2 +1,4 @@
 *log
 cmds.sh
+*pyc
+__pycache__/

@@ -188,63 +188,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_OWNER: ${{ env.IMAGE_OWNER }}
         run: |
-          python3 << 'PYEOF'
-          import re
-          import sys
-
-          from scripts.registry_helpers import list_ghcr_tags
-
-          def get_rdkit_versions():
-              versions = set()
-              pattern = re.compile(r'^rocky9-postgres\d+\.\d+-rdkit(\d+\.\d+\.\d+)$')
-              for tag in list_ghcr_tags("rdkit-postgres"):
-                  m = pattern.match(tag)
-                  if m:
-                      versions.add(m.group(1))
-              return sorted(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
-
-          versions = get_rdkit_versions()
-          if not versions:
-              print("No RDKit versions found on GHCR, skipping update")
-              sys.exit(0)
-
-          latest = versions[-1]
-          parts = [f"**{v} (latest)**" if v == latest else v for v in versions]
-          versions_str = ", ".join(parts)
-          print(f"Found versions: {versions_str}")
-
-          with open("README.md") as f:
-              content = f.read()
-          new_content = re.sub(
-              r'(\| \*\*RDKit\*\* \| ).*?( \|)',
-              rf'\g<1>{versions_str}\g<2>',
-              content,
-          )
-          if new_content != content:
-              with open("README.md", "w") as f:
-                  f.write(new_content)
-              print("Updated README.md")
-          else:
-              print("README.md unchanged")
-
-          with open("ghcr-summary.md") as f:
-              content = f.read()
-          new_content = re.sub(
-              r'(### RDKit Versions\n- ).*',
-              rf'\g<1>{versions_str}',
-              content,
-          )
-          if new_content != content:
-              with open("ghcr-summary.md", "w") as f:
-                  f.write(new_content)
-              print("Updated ghcr-summary.md")
-          else:
-              print("ghcr-summary.md unchanged")
-          PYEOF
+          python3 -m scripts.actions update-docs rdkit \
+            --package-name "${IMAGE_NAME}"
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md ghcr-summary.md
+          git add README.md
           git diff --staged --quiet || (git commit -m "docs: update supported RDKit versions" && git push)
