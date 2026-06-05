@@ -1,6 +1,6 @@
 services:
     rdkit:
-        image: ghcr.io/asiomchen/cheminfo-db:rocky9-postgres15.15-bingo1.34.0
+        image: ghcr.io/asiomchen/bingo-postgres:rocky9-postgres15.15-bingo1.34.0
         container_name: test-rocky9-postgres15.15-bingo1.34.0
         environment:
             - POSTGRES_PASSWORD=postgres

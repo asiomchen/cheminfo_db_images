@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This repository contains Docker image definitions for PostgreSQL with cheminformatics extensions (RDKit and Bingo) built on Rocky Linux 9. Images are published to GHCR as `ghcr.io/asiomchen/cheminfo-db`.
+This repository contains Docker image definitions for PostgreSQL with cheminformatics extensions (RDKit and Bingo) built on Rocky Linux 9. Final images are published to GHCR as `ghcr.io/asiomchen/rdkit-postgres` and `ghcr.io/asiomchen/bingo-postgres`.
 
 ## Repository Structure
 
@@ -40,7 +40,7 @@ docker build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.7 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg RDKIT_GIT_REF=Release_2024_03_6 \
-  -t ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.7-rdkit2024.03.6 \
+  -t ghcr.io/asiomchen/rdkit-postgres:rocky9-postgres17.7-rdkit2024.03.6 \
   -f rdkit/Dockerfile rdkit/
 
 # Bingo
@@ -49,7 +49,7 @@ docker build --platform linux/amd64 \
   --build-arg POSTGRES_VERSION=17.7 \
   --build-arg POSTGRES_MAJOR_VERSION=17 \
   --build-arg BINGO_VERSION=1.36.0 \
-  -t ghcr.io/asiomchen/cheminfo-db:rocky9-postgres17.7-bingo1.36.0 \
+  -t ghcr.io/asiomchen/bingo-postgres:rocky9-postgres17.7-bingo1.36.0 \
   -f bingo/Dockerfile bingo/
 ```
 
@@ -57,7 +57,7 @@ docker build --platform linux/amd64 \
 
 ```bash
 # RDKit
-docker run -d -p 5432:5432 --name test-rdkit -e POSTGRES_PASSWORD=postgres ghcr.io/asiomchen/cheminfo-db:<tag>
+docker run -d -p 5432:5432 --name test-rdkit -e POSTGRES_PASSWORD=postgres ghcr.io/asiomchen/rdkit-postgres:<tag>
 sleep 5
 docker exec test-rdkit psql -U postgres -c "SELECT rdkit_version(); SELECT mol_logp(mol_from_smiles('CCO'));"
 docker stop test-rdkit && docker rm test-rdkit

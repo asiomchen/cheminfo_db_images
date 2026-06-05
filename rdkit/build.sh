@@ -5,7 +5,7 @@ set -euo pipefail
 # Configuration
 REGISTRY="ghcr.io"
 IMAGE_OWNER="asiomchen"
-IMAGE_NAME="cheminfo-db"
+IMAGE_NAME="rdkit-postgres"
 DIST_IMAGE_NAME="rdkit-postgres-dist"
 
 # Version matrices

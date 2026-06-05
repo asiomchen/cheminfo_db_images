@@ -3,7 +3,7 @@ set -euo pipefail
 
 REGISTRY="ghcr.io"
 IMAGE_OWNER="asiomchen"
-IMAGE_NAME="cheminfo-db"
+IMAGE_NAME="bingo-postgres"
 ROCKY_VERSION="9"
 POSTGRES_MAJOR_VERSION="15"
 POSTGRES_VERSION=""

@@ -4,7 +4,7 @@ set -euo pipefail
 # Configuration
 REGISTRY="ghcr.io"
 IMAGE_OWNER="asiomchen"
-IMAGE_NAME="cheminfo-db"
+IMAGE_NAME="bingo-postgres"
 
 # Version matrices
 ROCKY_VERSIONS=("9")

@@ -2,14 +2,15 @@
 
 # Cheminformatic Database Images
 
-[![GHCR](https://img.shields.io/badge/GHCR-cheminfo--db-2496ED?logo=github&logoColor=fff)](https://github.com/asiomchen/cheminfo_db_images/pkgs/container/cheminfo-db)
+[![RDKit GHCR](https://img.shields.io/badge/GHCR-rdkit--postgres-2496ED?logo=github&logoColor=fff)](https://github.com/asiomchen/cheminfo_db_images/pkgs/container/rdkit-postgres)
+[![Bingo GHCR](https://img.shields.io/badge/GHCR-bingo--postgres-2496ED?logo=github&logoColor=fff)](https://github.com/asiomchen/cheminfo_db_images/pkgs/container/bingo-postgres)
 
 
 Yet another PostgreSQL images with pre-installed **RDKit** or **Bingo** extensions, built on **Rocky Linux 9**.
 
 Supports **linux/amd64** and **linux/arm64** architectures.
 
-Images are published to GitHub Container Registry under `ghcr.io/asiomchen`.
+Images are published to GitHub Container Registry under `ghcr.io/asiomchen/rdkit-postgres` and `ghcr.io/asiomchen/bingo-postgres`.
 
 ## Quick Start
 
@@ -17,12 +18,12 @@ Run a PostgreSQL instance with the RDKit extension:
 
 ```bash
 docker run -d \
-  --name cheminfo-db \
+  --name rdkit-postgres \
   -e POSTGRES_PASSWORD=mysecretpassword \
   -e POSTGRES_DB=chemistry \
   -p 5432:5432 \
   -v pgdata:/var/lib/postgresql/data \
-  ghcr.io/asiomchen/cheminfo-db:postgres17-rdkit2024.03.6
+  ghcr.io/asiomchen/rdkit-postgres:postgres17-rdkit2024.03.6
 ```
 
 ## Image Tagging
