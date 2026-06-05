@@ -42,7 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     rdkit_dist = subparsers.add_parser("prepare-rdkit-dist")
     rdkit_dist.add_argument("--image-name", required=True)
-    rdkit_dist.add_argument("--rdkit-ref", required=True)
+    rdkit_dist.add_argument("--mode", required=True)
+    rdkit_dist.add_argument("--rdkit-ref", default="")
+    rdkit_dist.add_argument("--min-rdkit-version", default="")
+    rdkit_dist.add_argument("--max-rdkit-version", default="")
     rdkit_dist.add_argument("--pg-majors", required=True)
 
     rdkit_dist_all = subparsers.add_parser("prepare-rdkit-dist-all")
@@ -54,16 +57,18 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("prepare-bingo-runtime", "prepare-bingo-runtime-all"):
         subparser = subparsers.add_parser(command)
         add_common_image_args(subparser)
-        if command.endswith("-all"):
-            subparser.add_argument("--min-bingo-version", required=True)
-            subparser.add_argument("--max-bingo-version", default="")
+        subparser.add_argument("--mode", default="range")
+        subparser.add_argument("--bingo-version", default="")
+        subparser.add_argument("--min-bingo-version", default="")
+        subparser.add_argument("--max-bingo-version", default="")
 
     for command in ("prepare-rdkit-runtime", "prepare-rdkit-runtime-all"):
         subparser = subparsers.add_parser(command)
         add_common_image_args(subparser)
-        if command.endswith("-all"):
-            subparser.add_argument("--min-rdkit-version", required=True)
-            subparser.add_argument("--max-rdkit-version", default="")
+        subparser.add_argument("--mode", default="range")
+        subparser.add_argument("--rdkit-version", default="")
+        subparser.add_argument("--min-rdkit-version", default="")
+        subparser.add_argument("--max-rdkit-version", default="")
 
     update_docs = subparsers.add_parser("update-docs")
     update_docs.add_argument("extension", choices=("bingo", "rdkit"))
@@ -89,7 +94,10 @@ def main() -> None:
     elif args.command == "prepare-rdkit-dist":
         write_outputs(matrices.prepare_rdkit_dist(
             args.image_name,
+            args.mode,
             args.rdkit_ref,
+            args.min_rdkit_version,
+            args.max_rdkit_version,
             args.pg_majors,
         ))
     elif args.command == "prepare-rdkit-dist-all":
@@ -107,6 +115,10 @@ def main() -> None:
             args.dist_image_name,
             args.rocky_version,
             args.pg_majors,
+            args.mode,
+            args.bingo_version,
+            args.min_bingo_version,
+            args.max_bingo_version,
         ))
     elif args.command == "prepare-bingo-runtime-all":
         write_outputs(matrices.prepare_bingo_runtime_all(
@@ -127,6 +139,10 @@ def main() -> None:
             args.dist_image_name,
             args.rocky_version,
             args.pg_majors,
+            args.mode,
+            args.rdkit_version,
+            args.min_rdkit_version,
+            args.max_rdkit_version,
         ))
     elif args.command == "prepare-rdkit-runtime-all":
         write_outputs(matrices.prepare_rdkit_runtime_all(
@@ -147,4 +163,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

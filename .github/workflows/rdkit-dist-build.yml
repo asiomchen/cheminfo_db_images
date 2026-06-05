@@ -3,19 +3,41 @@ name: Build RDKit Dist Images
 on:
   workflow_dispatch:
     inputs:
-      rdkit_ref:
-        description: RDKit git tag to build from, for example Release_2025_09_5
+      mode:
+        description: Build mode
         required: true
+        default: single
+        type: choice
+        options:
+          - single
+          - range
+      rdkit_ref:
+        description: RDKit git tag for single mode, for example Release_2025_09_5
+        required: false
+        type: string
+      min_rdkit_version:
+        description: Minimum RDKit version for range mode, for example 2024.03.6
+        required: false
+        default: "2024.03.6"
+        type: string
+      max_rdkit_version:
+        description: Maximum RDKit version for range mode, for example 2025.09.1
+        required: false
+        default: ""
         type: string
       pg_majors:
         description: PostgreSQL majors to build, separated by spaces or commas
         required: false
         default: "16 17 18"
         type: string
+  schedule:
+    - cron: "0 12 * * *"
 
 env:
   IMAGE_OWNER: asiomchen
   IMAGE_NAME: rdkit-postgres-dist
+  PG_MAJORS: "16 17 18"
+  DEFAULT_MIN_RDKIT_VERSION: "2024.03.6"
 
 permissions:
   contents: read
@@ -23,7 +45,7 @@ permissions:
 
 jobs:
   prepare-matrix:
-    name: Prepare manual dist build matrix
+    name: Prepare dist build matrix
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.prepare.outputs.matrix }}
@@ -32,18 +54,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Validate input and check GHCR
+      - name: Resolve versions and check GHCR
         id: prepare
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_OWNER: ${{ env.IMAGE_OWNER }}
-          RDKIT_REF: ${{ inputs.rdkit_ref }}
+          MODE_INPUT: ${{ inputs.mode }}
+          RDKIT_REF_INPUT: ${{ inputs.rdkit_ref }}
+          MIN_RDKIT_VERSION_INPUT: ${{ inputs.min_rdkit_version }}
+          MAX_RDKIT_VERSION_INPUT: ${{ inputs.max_rdkit_version }}
           PG_MAJORS_INPUT: ${{ inputs.pg_majors }}
         run: |
+          MODE="${MODE_INPUT:-range}"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            MODE="range"
+          fi
+
           python3 -m scripts.actions prepare-rdkit-dist \
             --image-name "${IMAGE_NAME}" \
-            --rdkit-ref "${RDKIT_REF}" \
-            --pg-majors "${PG_MAJORS_INPUT}"
+            --mode "${MODE}" \
+            --rdkit-ref "${RDKIT_REF_INPUT}" \
+            --min-rdkit-version "${MIN_RDKIT_VERSION_INPUT:-${DEFAULT_MIN_RDKIT_VERSION}}" \
+            --max-rdkit-version "${MAX_RDKIT_VERSION_INPUT}" \
+            --pg-majors "${PG_MAJORS_INPUT:-${PG_MAJORS}}"
 
   build-and-push:
     needs: prepare-matrix

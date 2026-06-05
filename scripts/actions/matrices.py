@@ -188,19 +188,25 @@ def _prepare_bingo_dist_targets(
 
 def prepare_rdkit_dist(
     image_name: str,
+    mode: str,
     rdkit_ref: str,
+    min_rdkit_version: str,
+    max_rdkit_version: str,
     pg_majors: str,
     tag_exists: Callable[[str], bool] | None = None,
 ) -> ActionOutputs:
-    """Prepare the matrix for a manual RDKit dist image build."""
+    """Prepare the matrix for RDKit dist image builds."""
     tag_exists = tag_exists or (lambda tag: ghcr_tag_exists(image_name, tag))
-    rdkit_clean = parse_rdkit_ref(rdkit_ref)
-    print(f"Manual dist build: {rdkit_ref} -> {rdkit_clean}", flush=True)
-    return _prepare_rdkit_dist_targets(
-        [{"ref": rdkit_ref, "clean": rdkit_clean}],
-        pg_majors,
-        tag_exists,
-    )
+    if mode == "single":
+        rdkit_clean = parse_rdkit_ref(rdkit_ref)
+        rdkit_releases = [{"ref": rdkit_ref, "clean": rdkit_clean}]
+        print(f"Single RDKit dist build: {rdkit_ref} -> {rdkit_clean}", flush=True)
+    elif mode == "range":
+        rdkit_releases = _rdkit_releases_in_range(min_rdkit_version, max_rdkit_version)
+    else:
+        raise RuntimeError(f"Unsupported mode: {mode}")
+    print(f"Mode: {mode}", flush=True)
+    return _prepare_rdkit_dist_targets(rdkit_releases, pg_majors, tag_exists)
 
 
 def prepare_rdkit_dist_all(
@@ -212,6 +218,14 @@ def prepare_rdkit_dist_all(
 ) -> ActionOutputs:
     """Prepare the matrix for all RDKit dist versions in a range."""
     tag_exists = tag_exists or (lambda tag: ghcr_tag_exists(image_name, tag))
+    rdkit_releases = _rdkit_releases_in_range(min_rdkit_version, max_rdkit_version)
+    return _prepare_rdkit_dist_targets(rdkit_releases, pg_majors, tag_exists)
+
+
+def _rdkit_releases_in_range(
+    min_rdkit_version: str,
+    max_rdkit_version: str,
+) -> list[dict[str, str]]:
     max_version = max_rdkit_version or None
     rdkit_releases = get_rdkit_releases(min_rdkit_version, max_version)
     if max_version:
@@ -226,7 +240,7 @@ def prepare_rdkit_dist_all(
             f"{[item['clean'] for item in rdkit_releases]}",
             flush=True,
         )
-    return _prepare_rdkit_dist_targets(rdkit_releases, pg_majors, tag_exists)
+    return rdkit_releases
 
 
 def _prepare_rdkit_dist_targets(
@@ -279,24 +293,31 @@ def prepare_bingo_runtime(
     dist_image_name: str,
     rocky_version: str,
     pg_majors: str,
+    mode: str,
+    bingo_version: str,
+    min_bingo_version: str,
+    max_bingo_version: str,
     tag_exists: Callable[[str], bool] | None = None,
 ) -> ActionOutputs:
-    """Prepare the matrix for latest-version Bingo final images."""
+    """Prepare the matrix for Bingo final images."""
     tag_exists = tag_exists or (lambda tag: tag in set(list_ghcr_tags(image_name)))
     dist_versions = dist_versions_by_pg_major(dist_image_name)
-    try:
-        latest_bingo = _latest_version_across_pg_majors(dist_versions, pg_majors, "Bingo")
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", flush=True)
-        return _outputs([], [])
-    print(f"Latest Bingo version detected from bingo-dist tags: {latest_bingo}", flush=True)
+    versions_by_major = _runtime_versions_by_mode(
+        "Bingo",
+        mode,
+        bingo_version,
+        min_bingo_version,
+        max_bingo_version,
+        dist_versions,
+        pg_majors,
+    )
     return _prepare_bingo_runtime_versions(
         registry,
         image_owner,
         dist_image_name,
         rocky_version,
         pg_majors,
-        {major: [latest_bingo] for major in parse_pg_majors(pg_majors)},
+        versions_by_major,
         dist_versions,
         tag_exists,
     )
@@ -314,36 +335,17 @@ def prepare_bingo_runtime_all(
     tag_exists: Callable[[str], bool] | None = None,
 ) -> ActionOutputs:
     """Prepare the matrix for all Bingo final image versions in a range."""
-    tag_exists = tag_exists or (lambda tag: tag in set(list_ghcr_tags(image_name)))
-    dist_versions = dist_versions_by_pg_major(dist_image_name)
-    min_v = version_tuple(min_bingo_version)
-    max_v = version_tuple(max_bingo_version) if max_bingo_version else None
-    if max_bingo_version:
-        print(
-            f"Using bingo-dist tags for Bingo versions from "
-            f"{min_bingo_version} to {max_bingo_version}",
-            flush=True,
-        )
-    else:
-        print(f"Using bingo-dist tags for Bingo versions >= {min_bingo_version}", flush=True)
-    versions_by_major = {
-        major: [
-            version for version in dist_versions.get(major, [])
-            if version_tuple(version) >= min_v
-            and (max_v is None or version_tuple(version) <= max_v)
-        ]
-        for major in parse_pg_majors(pg_majors)
-    }
-    for major, versions in versions_by_major.items():
-        print(f"PG{major} bingo-dist versions in range: {versions}", flush=True)
-    return _prepare_bingo_runtime_versions(
+    return prepare_bingo_runtime(
         registry,
         image_owner,
+        image_name,
         dist_image_name,
         rocky_version,
         pg_majors,
-        versions_by_major,
-        dist_versions,
+        "range",
+        "",
+        min_bingo_version,
+        max_bingo_version,
         tag_exists,
     )
 
@@ -355,24 +357,31 @@ def prepare_rdkit_runtime(
     dist_image_name: str,
     rocky_version: str,
     pg_majors: str,
+    mode: str,
+    rdkit_version: str,
+    min_rdkit_version: str,
+    max_rdkit_version: str,
     tag_exists: Callable[[str], bool] | None = None,
 ) -> ActionOutputs:
-    """Prepare the matrix for latest-version RDKit final images."""
+    """Prepare the matrix for RDKit final images."""
     tag_exists = tag_exists or (lambda tag: tag in set(list_ghcr_tags(image_name)))
     dist_versions = dist_versions_by_pg_major(dist_image_name)
-    try:
-        latest_rdkit = _latest_version_across_pg_majors(dist_versions, pg_majors, "RDKit")
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", flush=True)
-        return _outputs([], [])
-    print(f"Latest RDKit version detected from dist tags: {latest_rdkit}", flush=True)
+    versions_by_major = _runtime_versions_by_mode(
+        "RDKit",
+        mode,
+        rdkit_version,
+        min_rdkit_version,
+        max_rdkit_version,
+        dist_versions,
+        pg_majors,
+    )
     return _prepare_rdkit_runtime_versions(
         registry,
         image_owner,
         dist_image_name,
         rocky_version,
         pg_majors,
-        {major: [latest_rdkit] for major in parse_pg_majors(pg_majors)},
+        versions_by_major,
         dist_versions,
         tag_exists,
     )
@@ -390,58 +399,58 @@ def prepare_rdkit_runtime_all(
     tag_exists: Callable[[str], bool] | None = None,
 ) -> ActionOutputs:
     """Prepare the matrix for all RDKit final image versions in a range."""
-    tag_exists = tag_exists or (lambda tag: tag in set(list_ghcr_tags(image_name)))
-    dist_versions = dist_versions_by_pg_major(dist_image_name)
-    min_v = version_tuple(min_rdkit_version)
-    max_v = version_tuple(max_rdkit_version) if max_rdkit_version else None
-    if max_rdkit_version:
-        print(
-            f"Using rdkit-postgres-dist tags for RDKit versions from "
-            f"{min_rdkit_version} to {max_rdkit_version}",
-            flush=True,
-        )
-    else:
-        print(
-            f"Using rdkit-postgres-dist tags for RDKit versions >= {min_rdkit_version}",
-            flush=True,
-        )
-    versions_by_major = {
-        major: [
-            version for version in dist_versions.get(major, [])
-            if version_tuple(version) >= min_v
-            and (max_v is None or version_tuple(version) <= max_v)
-        ]
-        for major in parse_pg_majors(pg_majors)
-    }
-    for major, versions in versions_by_major.items():
-        print(f"PG{major} rdkit-postgres-dist versions in range: {versions}", flush=True)
-    return _prepare_rdkit_runtime_versions(
+    return prepare_rdkit_runtime(
         registry,
         image_owner,
+        image_name,
         dist_image_name,
         rocky_version,
         pg_majors,
-        versions_by_major,
-        dist_versions,
+        "range",
+        "",
+        min_rdkit_version,
+        max_rdkit_version,
         tag_exists,
     )
 
 
-def _latest_version_across_pg_majors(
+def _runtime_versions_by_mode(
+    name: str,
+    mode: str,
+    version: str,
+    min_version: str,
+    max_version: str,
     dist_versions: dict[str, list[str]],
     pg_majors: str,
-    name: str,
-) -> str:
-    latest_version = None
-    for pg_major in parse_pg_majors(pg_majors):
-        versions = dist_versions.get(pg_major, [])
-        if versions:
-            candidate = versions[-1]
-            if latest_version is None or version_tuple(candidate) > version_tuple(latest_version):
-                latest_version = candidate
-    if not latest_version:
-        raise RuntimeError(f"Could not detect any {name} version from dist tags")
-    return latest_version
+) -> dict[str, list[str]]:
+    pg_major_values = parse_pg_majors(pg_majors)
+    if mode == "single":
+        clean_version = parse_numeric_semver(version, f"{name.lower()}_version")
+        print(f"Using {name} dist tag version {clean_version}", flush=True)
+        return {major: [clean_version] for major in pg_major_values}
+    if mode != "range":
+        raise RuntimeError(f"Unsupported mode: {mode}")
+
+    min_v = version_tuple(min_version)
+    max_v = version_tuple(max_version) if max_version else None
+    if max_version:
+        print(
+            f"Using dist tags for {name} versions from {min_version} to {max_version}",
+            flush=True,
+        )
+    else:
+        print(f"Using dist tags for {name} versions >= {min_version}", flush=True)
+    versions_by_major = {
+        major: [
+            candidate for candidate in dist_versions.get(major, [])
+            if version_tuple(candidate) >= min_v
+            and (max_v is None or version_tuple(candidate) <= max_v)
+        ]
+        for major in pg_major_values
+    }
+    for major, versions in versions_by_major.items():
+        print(f"PG{major} {name} dist versions in range: {versions}", flush=True)
+    return versions_by_major
 
 
 def _prepare_bingo_runtime_versions(
@@ -457,9 +466,13 @@ def _prepare_bingo_runtime_versions(
     matrix_entries: list[dict[str, str]] = []
     merge_entries: list[dict[str, str]] = []
     for major in parse_pg_majors(pg_majors):
+        versions = versions_by_major.get(major, [])
+        if not versions:
+            print(f"PG{major} Bingo versions to build: []", flush=True)
+            continue
         minor = latest_pg_minor(major)
         print(f"PG{major} latest minor: {minor}", flush=True)
-        for bingo_version in versions_by_major.get(major, []):
+        for bingo_version in versions:
             if bingo_version not in dist_versions.get(major, []):
                 print(
                     f"  -> No bingo-dist tag for Bingo {bingo_version} + PG{major}, skipping",
@@ -506,9 +519,13 @@ def _prepare_rdkit_runtime_versions(
     matrix_entries: list[dict[str, str]] = []
     merge_entries: list[dict[str, str]] = []
     for major in parse_pg_majors(pg_majors):
+        versions = versions_by_major.get(major, [])
+        if not versions:
+            print(f"PG{major} RDKit versions to build: []", flush=True)
+            continue
         minor = latest_pg_minor(major)
         print(f"PG{major} latest minor: {minor}", flush=True)
-        for rdkit_clean in versions_by_major.get(major, []):
+        for rdkit_clean in versions:
             if rdkit_clean not in dist_versions.get(major, []):
                 print(
                     f"  -> No rdkit-postgres-dist tag for RDKit {rdkit_clean} + PG{major}, skipping",
