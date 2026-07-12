@@ -27,6 +27,7 @@ RUN set -eux; \
     dnf -qy module disable postgresql; \
     dnf install -y \
     bzip2-libs \
+    expat \
     freetype \
     zlib \
     xz \

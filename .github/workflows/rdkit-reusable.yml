@@ -88,6 +88,8 @@ jobs:
 
           retry_psql "RDKit version" "SELECT rdkit_version();"
           retry_psql "RDKit mol_logp" "SELECT mol_logp(mol_from_smiles('CCO'));"
+          docker cp rdkit/test-cartridge.sql "${CONTAINER}:/tmp/test-cartridge.sql"
+          docker exec "${CONTAINER}" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/test-cartridge.sql
           docker exec "${CONTAINER}" sh -c "ldd /usr/pgsql-${{ matrix.pg_major }}/lib/rdkit.so | tee /tmp/rdkit-ldd.txt"
           docker exec "${CONTAINER}" sh -c "! grep -E 'libboost_|libRDKit' /tmp/rdkit-ldd.txt"
 

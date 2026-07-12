@@ -80,6 +80,7 @@ RUN set -eux; \
     cmake \
     diffutils \
     eigen3-devel \
+    expat-devel \
     freetype-devel \
     gcc-c++ \
     git \
