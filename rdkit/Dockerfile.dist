@@ -64,6 +64,7 @@ ARG RDKIT_VERSION
 COPY --from=boost-builder /opt/boost /opt/boost
 
 RUN set -eux; \
+    dnf upgrade -y --refresh; \
     ARCH="$(uname -m)"; \
     case "${ARCH}" in \
     x86_64) PGDG_ARCH='x86_64' ;; \

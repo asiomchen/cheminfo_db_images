@@ -16,6 +16,7 @@ LABEL org.opencontainers.image.title="Bingo PostgreSQL distribution builder" \
     org.opencontainers.image.source="https://github.com/asiomchen/cheminfo_db_images"
 
 RUN set -eux; \
+    dnf upgrade -y --refresh; \
     ARCH="$(uname -m)"; \
     case "${ARCH}" in \
     x86_64) PGDG_ARCH='x86_64' ;; \
