@@ -21,6 +21,7 @@ LABEL org.opencontainers.image.title="RDKit PostgreSQL" \
 # Install Runtime dependencies and PostgreSQL
 RUN set -eux; \
     POSTGRES_MAJOR_VERSION=$(echo ${POSTGRES_VERSION} | cut -d. -f1); \
+    dnf upgrade -y --refresh; \
     dnf install -y epel-release; \
     dnf config-manager --set-enabled crb; \
     dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm; \
