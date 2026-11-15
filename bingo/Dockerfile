@@ -25,6 +25,7 @@ LABEL org.opencontainers.image.title="Bingo PostgreSQL" \
 
 # Install PostgreSQL and dependencies
 RUN set -eux; \
+    dnf upgrade -y --refresh; \
     POSTGRES_MAJOR_VERSION=$(echo ${POSTGRES_VERSION} | cut -d. -f1); \
     ARCH=$(uname -m); \
     case "${ARCH}" in \
